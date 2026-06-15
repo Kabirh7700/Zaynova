@@ -17,6 +17,11 @@ import LeadModal from './components/LeadModal';
 import Preloader from './components/Preloader';
 import AdminDashboard from './components/AdminDashboard';
 
+// Import local image assets for correct bundler path resolution
+import luxuryInteriorHero from './assets/images/luxury_interior_hero_1781267401231.jpg';
+import luxuryKitchen from './assets/images/luxury_kitchen_1781267417904.jpg';
+import luxuryOffice from './assets/images/luxury_office_1781267434698.jpg';
+
 // Interactive Custom Premium Logo with Architectural & Civil Elements
 export function ZaynovaLogo({ className = "h-11 w-11", showText = true, textClass = "text-xl md:text-2xl" }) {
   return (
@@ -317,12 +322,12 @@ export default function App() {
   // Gallery items matched with categorizations
   const GALLERY_ITEMS = [
     { id: 1, category: 'Interiors', tag: 'Living Room', image: 'https://images.unsplash.com/photo-1600210492486-724fe5c67fb0?auto=format&fit=crop&q=80&w=800' },
-    { id: 2, category: 'Renovation', tag: 'Kitchen', image: '/src/assets/images/luxury_kitchen_1781267417904.jpg' },
-    { id: 3, category: 'Commercial', tag: 'Office Lobby', image: '/src/assets/images/luxury_office_1781267434698.jpg' },
+    { id: 2, category: 'Renovation', tag: 'Kitchen', image: luxuryKitchen },
+    { id: 3, category: 'Commercial', tag: 'Office Lobby', image: luxuryOffice },
     { id: 4, category: 'Civil Works', tag: 'Reinforcement', image: 'https://images.unsplash.com/photo-1504307651254-35680f356dfd?auto=format&fit=crop&q=80&w=800' },
     { id: 5, category: 'Residential', tag: 'Master Bedroom', image: 'https://images.unsplash.com/photo-1616594039964-ae9021a400a0?auto=format&fit=crop&q=80&w=800' },
     { id: 6, category: 'Interiors', tag: 'Luxury Dining', image: 'https://images.unsplash.com/photo-1613490493576-7fde63acd811?auto=format&fit=crop&q=80&w=800' },
-    { id: 7, category: 'Residential', tag: 'Custom Closet', image: 'https://images.unsplash.com/photo-1558882224-cca166733360?auto=format&fit=crop&q=80&w=800' },
+    { id: 7, category: 'Residential', tag: 'Custom Closet', image: 'https://images.unsplash.com/photo-1616486338812-3dadae4b4ace?auto=format&fit=crop&q=80&w=800' },
     { id: 8, category: 'Renovation', tag: 'Spa Washroom', image: 'https://images.unsplash.com/photo-1552321554-5fefe8c9ef14?auto=format&fit=crop&q=80&w=800' },
     { id: 9, category: 'Civil Works', tag: 'Ceiling Frame', image: 'https://images.unsplash.com/photo-1513694203232-719a280e022f?auto=format&fit=crop&q=80&w=800' }
   ];
@@ -516,7 +521,7 @@ export default function App() {
         {/* Cinematic Backdrop Image */}
         <div className="absolute inset-0 z-0">
           <img 
-            src="/src/assets/images/luxury_interior_hero_1781267401231.jpg" 
+            src={luxuryInteriorHero} 
             alt="Zaynova Premium Architectural Residence Layout" 
             className="w-full h-full object-cover scale-[1.03] opacity-65"
             referrerPolicy="no-referrer"

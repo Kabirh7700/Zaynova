@@ -1554,22 +1554,13 @@ export default function App() {
               </h5>
               <div className="flex gap-3 pt-2">
                 <a 
-                  href="https://instagram.com" 
+                  href="https://www.instagram.com/zaynova.in" 
                   target="_blank" 
                   rel="noreferrer"
                   id="instagram-social"
                   className="w-10 h-10 rounded-lg bg-dark-charcoal border border-neutral-850 text-gray-400 hover:text-gold-400 flex items-center justify-center transition-all"
                 >
                   <InstagramIcon className="w-4 h-4" />
-                </a>
-                <a 
-                  href="https://facebook.com" 
-                  target="_blank" 
-                  rel="noreferrer"
-                  id="facebook-social"
-                  className="w-10 h-10 rounded-lg bg-dark-charcoal border border-neutral-850 text-gray-400 hover:text-gold-400 flex items-center justify-center transition-all"
-                >
-                  <FacebookIcon className="w-4 h-4" />
                 </a>
                 <a 
                   href="https://wa.me/918750083150" 

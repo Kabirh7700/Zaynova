@@ -1,0 +1,8 @@
+{
+  "name": "ZAYNOVA",
+  "description": "Premium Interior, Renovation, and Civil Works - Luxury Spaces. Built Right.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

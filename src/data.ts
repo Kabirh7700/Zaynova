@@ -1,4 +1,6 @@
 import { Service, Project, Testimonial, FAQItem, ProcessStep } from './types';
+import luxuryKitchen from './assets/images/luxury_kitchen_1781267417904.jpg';
+import luxuryOffice from './assets/images/luxury_office_1781267434698.jpg';
 
 export const SERVICES: Service[] = [
   {
@@ -162,7 +164,7 @@ export const PROJECTS: Project[] = [
     title: 'Aurelia Bespoke Culinary Studio',
     location: 'Greater Kailash II, New Delhi',
     category: 'Modular Kitchens',
-    image: '/src/assets/images/luxury_kitchen_1781267417904.jpg',
+    image: luxuryKitchen,
     size: '650 Sq. Ft.',
     scope: 'Luxury Modular Concept & Italian Quartz'
   },
@@ -171,7 +173,7 @@ export const PROJECTS: Project[] = [
     title: 'Verve Executive Corporate Headquarters',
     location: 'Sector 62 Enterprise Zone, Noida, NCR',
     category: 'Office Interiors',
-    image: '/src/assets/images/luxury_office_1781267434698.jpg',
+    image: luxuryOffice,
     size: '12,000 Sq. Ft.',
     scope: 'Premium Corporate Fit-out & Renovation'
   },
@@ -334,7 +336,7 @@ export const FAQS: FAQItem[] = [
 export const WHY_CHOOSE_US_POINTS = [
   {
     title: 'Experienced Execution Team',
-    description: 'Led by premium interior architects and civil engineers who have delivered exquisite, elite spaces since our inception.',
+    description: 'Led by premium interior architects and civil engineers with over 17 years in luxury space delivery.',
     iconName: 'Users'
   },
   {
@@ -389,8 +391,8 @@ export const TRUST_INDICATORS = [
 ];
 
 export const STATS = [
-  { label: 'Projects Completed', value: '115', suffix: '+' },
-  { label: 'Years of Experience', value: '4', suffix: '+' },
-  { label: 'Happy Clients', value: '98', suffix: '+' },
-  { label: 'Site Visits Conducted', value: '290', suffix: '+' }
+  { label: 'Projects Completed', value: '520', suffix: '+' },
+  { label: 'Years of Experience', value: '17', suffix: '+' },
+  { label: 'Happy Clients', value: '380', suffix: '+' },
+  { label: 'Site Visits Conducted', value: '1,800', suffix: '+' }
 ];

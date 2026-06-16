@@ -22,6 +22,38 @@ import luxuryInteriorHero from './assets/images/luxury_interior_hero_17812674012
 import luxuryKitchen from './assets/images/luxury_kitchen_1781267417904.jpg';
 import luxuryOffice from './assets/images/luxury_office_1781267434698.jpg';
 
+// Premium high-res showcase photos for quick hero spotlight (eliminates scrolling frustration)
+export const SPOTLIGHT_IMAGES = [
+  {
+    id: 1,
+    title: 'Bespoke Custom Walk-In Closet Curation',
+    desc: 'Premium LED sensor illumination, sleek bronze-tinted glass sliding profile profiles, meticulously segmented boutique cabinetry, and customized accessory organizer systems.',
+    image: 'https://images.unsplash.com/photo-1616486338812-3dadae4b4ace?auto=format&fit=crop&q=80&w=800',
+    type: 'Luxury Custom Closet'
+  },
+  {
+    id: 2,
+    title: 'Aurelia Culinary Modular Kitchen Studio',
+    desc: 'Integrated modern modular kitchen workspace boasting polished Italian calacatta quartz benchtops, warm profile LED details, and soft-close ergonomic fittings.',
+    image: luxuryKitchen,
+    type: 'Modular Kitchen'
+  },
+  {
+    id: 3,
+    title: 'Verve Corporate Office Headquarters Lobby',
+    desc: 'Grand entrance foyer incorporating premium grooved walnut acoustic wood panel screens, contemporary architectural linear layout, and recessed floor-wash luminaires.',
+    image: luxuryOffice,
+    type: 'Commercial Executive Office'
+  },
+  {
+    id: 4,
+    title: 'Grand Opulent Master Residence Lounge',
+    desc: 'Architectural living room styled with bespoke gold-pinnacle metallic trim bands, warm recessed false ceiling detailings, and sophisticated luxury lounge furnishings.',
+    image: 'https://images.unsplash.com/photo-1600210492486-724fe5c67fb0?auto=format&fit=crop&q=80&w=800',
+    type: 'Luxury Living Room'
+  }
+];
+
 // Interactive Custom Premium Logo with Architectural & Civil Elements
 export function ZaynovaLogo({ className = "h-11 w-11", showText = true, textClass = "text-xl md:text-2xl" }) {
   return (
@@ -189,14 +221,28 @@ export default function App() {
   // Lightbox state
   const [lightboxImage, setLightboxImage] = useState<string | null>(null);
 
-  // Scroll effect to upgrade Navigation bar style
+  // Spotlight index state for elite showcase Carousel (at the top)
+  const [currentSpotlightIndex, setCurrentSpotlightIndex] = useState(0);
+  const [showFloatingDock, setShowFloatingDock] = useState(false);
+
+  // Scroll effect to upgrade Navigation bar style & toggle Glassmorphic Floating Dock
   useEffect(() => {
     const handleScroll = () => {
       setNavScrolled(window.scrollY > 50);
+      setShowFloatingDock(window.scrollY > 300);
     };
     window.addEventListener('scroll', handleScroll);
     return () => window.removeEventListener('scroll', handleScroll);
   }, []);
+
+  // Automatic gentle rotation of Spotlight elements every 5.5s
+  useEffect(() => {
+    if (showPreloader) return;
+    const timer = setInterval(() => {
+      setCurrentSpotlightIndex((prev) => (prev + 1) % SPOTLIGHT_IMAGES.length);
+    }, 5500);
+    return () => clearInterval(timer);
+  }, [showPreloader]);
 
   // Prevent page scrolling while preloader is visible
   useEffect(() => {
@@ -516,7 +562,7 @@ export default function App() {
       {/* ---------------- HERO SECTION ---------------- */}
       <section 
         id="home"
-        className="relative h-screen flex items-center justify-center overflow-hidden pt-12"
+        className="relative min-h-screen lg:h-screen flex items-center justify-center overflow-hidden py-24 lg:py-16 pt-24 lg:pt-28"
       >
         {/* Cinematic Backdrop Image */}
         <div className="absolute inset-0 z-0">
@@ -539,57 +585,207 @@ export default function App() {
           <div className="absolute top-1/3 right-1/4 w-32 h-32 border border-gold-500/25 rounded-full filter blur-xl animate-pulse"></div>
         </div>
 
-        {/* Hero Content Space */}
-        <div className="relative z-10 max-w-5xl mx-auto px-4 text-center mt-12">
-          {/* Luxury Gold Icon Overlay */}
-          <div className="inline-flex justify-center mb-6 animate-fade-in">
-            <div className="p-3 bg-black/80 rounded-2xl border border-gold-500/30 shadow-2xl gold-glow">
-              <ZaynovaLogo showText={false} className="w-16 h-16" />
+        {/* Dynamic Responsive Screen grid setup (Hero Content Space) */}
+        <div className="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 w-full">
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-10 lg:gap-14 items-center">
+            
+            {/* Left Col: Master Typographics & Instant Shortcuts */}
+            <div className="lg:col-span-7 text-center lg:text-left flex flex-col items-center lg:items-start select-none">
+              {/* Luxury Gold Icon Overlay */}
+              <div className="inline-flex mb-5 animate-fade-in">
+                <div className="p-2.5 bg-black/85 rounded-xl border border-gold-500/30 shadow-2xl gold-glow">
+                  <ZaynovaLogo showText={false} className="w-12 h-12" />
+                </div>
+              </div>
+
+              <h2 className="text-xs uppercase tracking-[0.4em] font-outfit text-gold-300 font-medium mb-3">
+                Luxury Spaces. Built Right.
+              </h2>
+
+              <h1 className="text-3xl sm:text-5xl md:text-6xl xl:text-7.5xl font-display font-medium text-white mb-5 tracking-tight leading-[1.1] max-w-3xl">
+                Transforming Spaces <br />
+                <span className="gold-gradient-text italic font-normal font-serif">Into Timeless Luxury</span>
+              </h1>
+
+              <p className="text-zinc-300 text-sm md:text-base xl:text-lg font-sans font-light max-w-2xl mb-8 leading-relaxed">
+                Premium Interior, Renovation & Civil Work Solutions for elite Homes, Offices & Commercial Spaces. Executed with uncompromised engineering precision and absolute pricing transparency.
+              </p>
+
+              {/* Primary CTA Row */}
+              <div className="flex flex-col sm:flex-row gap-3 w-full sm:w-auto mb-8">
+                <button 
+                  type="button"
+                  id="hero-request-quotation"
+                  onClick={() => {
+                    trackEvent({ eventType: 'BUTTON_CLICK', eventDetail: 'Clicked Hero Header Action - Request Quotation' });
+                    openModal('quotation');
+                  }}
+                  className="w-full sm:w-auto px-6 py-3.5 bg-gradient-to-r from-gold-600 via-gold-500 to-gold-400 text-white font-outfit uppercase tracking-widest text-xs font-semibold rounded-xl shadow-xl gold-shadow hover:scale-103 transition-all text-center cursor-pointer"
+                >
+                  Request Quotation
+                </button>
+                <button 
+                  type="button"
+                  id="hero-book-site-visit"
+                  onClick={() => {
+                    trackEvent({ eventType: 'BUTTON_CLICK', eventDetail: 'Clicked Hero Header Action - Book Free Site Visit' });
+                    openModal('site-visit');
+                  }}
+                  className="w-full sm:w-auto px-6 py-3.5 border border-gold-400/40 hover:border-gold-300 bg-black/60 hover:bg-black/90 backdrop-blur text-gold-300 hover:text-white font-outfit uppercase tracking-widest text-xs font-semibold rounded-xl hover:scale-103 transition-all text-center cursor-pointer"
+                >
+                  Book Free Site Visit
+                </button>
+              </div>
+
+              {/* High-visibility instant jumping list (Option 1) */}
+              <div className="w-full border-t border-neutral-800/60 pt-5 flex flex-wrap justify-center lg:justify-start gap-4 text-xs font-outfit text-gray-400">
+                <span className="text-[10px] text-gold-400/70 uppercase tracking-widest font-semibold flex items-center gap-1.5 self-center">
+                  ⚡ Fast Access:
+                </span>
+                <a 
+                  href="#gallery" 
+                  className="px-3 py-1.5 bg-neutral-900/60 hover:bg-gold-950/20 rounded-lg border border-neutral-800/40 hover:border-gold-500/30 text-gray-300 hover:text-gold-300 transition-all flex items-center gap-1 cursor-pointer"
+                >
+                  📸 Custom Closet & Kitchen Photos
+                </a>
+                <a 
+                  href="#projects" 
+                  className="px-3 py-1.5 bg-neutral-900/60 hover:bg-gold-950/20 rounded-lg border border-neutral-800/40 hover:border-gold-500/30 text-gray-300 hover:text-gold-300 transition-all flex items-center gap-1 cursor-pointer"
+                >
+                  💼 Corporate Projects
+                </a>
+                <a 
+                  href="#services" 
+                  className="px-3 py-1.5 bg-neutral-900/60 hover:bg-gold-950/20 rounded-lg border border-neutral-800/40 hover:border-gold-500/30 text-gray-300 hover:text-gold-300 transition-all flex items-center gap-1 cursor-pointer"
+                >
+                  🛠️ Services
+                </a>
+              </div>
             </div>
-          </div>
 
-          <h2 className="text-xs uppercase tracking-[0.4em] font-outfit text-gold-300 font-medium mb-3">
-            Luxury Spaces. Built Right.
-          </h2>
+            {/* Right Col: Interactive Live Showcase Spotlight HUD (Option 2) */}
+            <div className="lg:col-span-5 w-full flex flex-col items-center">
+              <div className="w-full max-w-md bg-black/75 backdrop-blur-md rounded-2xl border border-gold-500/20 hover:border-gold-500/40 p-4 shadow-2xl transition-all duration-350 relative group">
+                
+                {/* Spotlight Header Tab */}
+                <div className="flex justify-between items-center mb-3 text-xs font-mono">
+                  <span className="text-gold-400 flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse inline-block"></span>
+                    LIVE VISUAL HUD
+                  </span>
+                  <span className="text-gray-500">
+                    {currentSpotlightIndex + 1} / {SPOTLIGHT_IMAGES.length}
+                  </span>
+                </div>
 
-          <h1 className="text-4xl sm:text-5xl md:text-7xl font-display font-medium text-white mb-6 tracking-tight leading-[1.1] max-w-4xl mx-auto">
-            Transforming Spaces <br />
-            <span className="gold-gradient-text italic font-normal font-serif">Into Timeless Luxury</span>
-          </h1>
+                {/* Main Spotlight Image Canvas */}
+                <div 
+                  className="aspect-[4/3] rounded-xl overflow-hidden relative border border-neutral-850/60 group/img cursor-zoom-in bg-zinc-900"
+                  onClick={() => {
+                    const activeImg = SPOTLIGHT_IMAGES[currentSpotlightIndex].image;
+                    trackEvent({ eventType: 'BUTTON_CLICK', eventDetail: `Zoomed Spotlight Image #${currentSpotlightIndex + 1}` });
+                    setLightboxImage(activeImg);
+                  }}
+                >
+                  <img 
+                    src={SPOTLIGHT_IMAGES[currentSpotlightIndex].image} 
+                    alt={SPOTLIGHT_IMAGES[currentSpotlightIndex].title}
+                    className="w-full h-full object-cover transition-all duration-700 brightness-95 group-hover/img:scale-105"
+                    referrerPolicy="no-referrer"
+                  />
+                  
+                  {/* Category Pill Tag Overlay */}
+                  <span className="absolute top-3 left-3 bg-black/85 backdrop-blur border border-gold-500/30 text-gold-300 text-[10px] uppercase font-outfit tracking-widest px-2.5 py-1 rounded-md font-semibold">
+                    {SPOTLIGHT_IMAGES[currentSpotlightIndex].type}
+                  </span>
 
-          <p className="text-zinc-300 text-base md:text-xl font-sans font-light max-w-3xl mx-auto mb-10 leading-relaxed">
-            Premium Interior, Renovation & Civil Work Solutions for high-end Homes, Offices & Commercial Spaces. Executed with uncompromised engineering precision and absolute pricing transparency.
-          </p>
+                  {/* Gentle hover magnifier hint */}
+                  <div className="absolute inset-0 bg-black/35 opacity-0 group-hover/img:opacity-100 transition-all flex items-center justify-center pointer-events-none">
+                    <div className="p-2.5 rounded-full bg-black/80 border border-gold-400 text-gold-400">
+                      <Maximize className="w-4 h-4" />
+                    </div>
+                  </div>
+                </div>
 
-          {/* CTA Row */}
-          <div className="flex flex-col sm:flex-row justify-center items-center gap-4 max-w-md mx-auto">
-            <button 
-              type="button"
-              id="hero-request-quotation"
-              onClick={() => {
-                trackEvent({ eventType: 'BUTTON_CLICK', eventDetail: 'Clicked Hero Header Action - Request Quotation' });
-                openModal('quotation');
-              }}
-              className="w-full sm:w-auto px-8 py-4 bg-gradient-to-r from-gold-600 via-gold-500 to-gold-400 text-white font-outfit uppercase tracking-widest text-xs font-semibold rounded-xl shadow-2xl gold-shadow hover:scale-105 transition-all text-center cursor-pointer"
-            >
-              Request Quotation
-            </button>
-            <button 
-              type="button"
-              id="hero-book-site-visit"
-              onClick={() => {
-                trackEvent({ eventType: 'BUTTON_CLICK', eventDetail: 'Clicked Hero Header Action - Book Free Site Visit' });
-                openModal('site-visit');
-              }}
-              className="w-full sm:w-auto px-8 py-4 border border-gold-400/40 hover:border-gold-300 bg-black/50 hover:bg-black/80 backdrop-blur text-gold-300 hover:text-white font-outfit uppercase tracking-widest text-xs font-semibold rounded-xl transition-all text-center cursor-pointer"
-            >
-              Book Free Site Visit
-            </button>
+                {/* Slide Details Metadata */}
+                <div className="mt-4 min-h-[72px]">
+                  <h4 className="text-sm font-display font-medium text-white tracking-wide uppercase leading-tight">
+                    {SPOTLIGHT_IMAGES[currentSpotlightIndex].title}
+                  </h4>
+                  <p className="text-xs text-gray-400 mt-1.5 leading-relaxed font-sans font-light">
+                    {SPOTLIGHT_IMAGES[currentSpotlightIndex].desc}
+                  </p>
+                </div>
+
+                {/* HUD Navigation Control Deck */}
+                <div className="flex justify-between items-center mt-3 border-t border-neutral-850/60 pt-3">
+                  {/* Left & Right custom buttons */}
+                  <div className="flex gap-2">
+                    <button 
+                      type="button"
+                      id="spotlight-prev"
+                      onClick={() => {
+                        const prevIdx = (currentSpotlightIndex - 1 + SPOTLIGHT_IMAGES.length) % SPOTLIGHT_IMAGES.length;
+                        trackEvent({ eventType: 'BUTTON_CLICK', eventDetail: `Clicked Spotlight Prev -> Slide #${prevIdx + 1}` });
+                        setCurrentSpotlightIndex(prevIdx);
+                      }}
+                      className="w-8 h-8 rounded-lg bg-neutral-900 border border-neutral-800 text-gray-400 hover:text-gold-400 flex items-center justify-center hover:bg-gold-950/10 hover:border-gold-500/35 transition-all cursor-pointer"
+                      title="Previous Slide"
+                    >
+                      <ChevronLeft className="w-4 h-4" />
+                    </button>
+                    <button 
+                      type="button"
+                      id="spotlight-next"
+                      onClick={() => {
+                        const nextIdx = (currentSpotlightIndex + 1) % SPOTLIGHT_IMAGES.length;
+                        trackEvent({ eventType: 'BUTTON_CLICK', eventDetail: `Clicked Spotlight Next -> Slide #${nextIdx + 1}` });
+                        setCurrentSpotlightIndex(nextIdx);
+                      }}
+                      className="w-8 h-8 rounded-lg bg-neutral-900 border border-neutral-800 text-gray-400 hover:text-gold-400 flex items-center justify-center hover:bg-gold-950/10 hover:border-gold-500/35 transition-all cursor-pointer"
+                      title="Next Slide"
+                    >
+                      <ChevronRight className="w-4 h-4" />
+                    </button>
+                  </div>
+
+                  {/* Thumbnail Row Indicator to easily jump to specific space */}
+                  <div className="flex gap-1.5">
+                    {SPOTLIGHT_IMAGES.map((item, idx) => (
+                      <button
+                        key={item.id}
+                        type="button"
+                        id={`spotlight-thumb-${idx}`}
+                        onClick={() => {
+                          trackEvent({ eventType: 'BUTTON_CLICK', eventDetail: `Clicked Spotlight Thumb -> Slide #${idx + 1}` });
+                          setCurrentSpotlightIndex(idx);
+                        }}
+                        className={`w-6 h-6 rounded overflow-hidden border transition-all ${
+                          currentSpotlightIndex === idx 
+                            ? 'border-gold-400 scale-110 shadow-md ring-1 ring-gold-500/30' 
+                            : 'border-neutral-800 opacity-60 hover:opacity-100 hover:border-neutral-600'
+                        }`}
+                        title={`Show ${item.type}`}
+                      >
+                        <img 
+                          src={item.image} 
+                          alt="Thumbnail preview" 
+                          className="w-full h-full object-cover" 
+                          referrerPolicy="no-referrer"
+                        />
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+              </div>
+            </div>
+
           </div>
         </div>
 
         {/* Fine-line arrow slide indicator */}
-        <div className="absolute bottom-8 left-1/2 -translate-x-1/2 z-10 hidden md:block">
+        <div className="absolute bottom-8 left-1/2 -translate-x-1/2 z-10 hidden lg:block">
           <a href="#trust-badges" className="flex flex-col items-center gap-2 text-gray-500 hover:text-gold-400 transition-colors">
             <span className="text-[10px] font-mono tracking-widest uppercase">Explore Excellence</span>
             <div className="w-1 h-12 bg-gradient-to-b from-gold-500 to-transparent rounded-full"></div>
@@ -1598,6 +1794,76 @@ export default function App() {
           </div>
         </div>
       </footer>
+
+
+      {/* ---------------- GLASSMORPHIC FLOATING NAVIGATION DOCK (Option 1) ---------------- */}
+      <div 
+        id="floating-navigation-dock"
+        className={`fixed bottom-6 left-1/2 -translate-x-1/2 z-40 px-5 py-2.5 rounded-full bg-black/85 backdrop-blur-lg border border-gold-500/30 shadow-2xl flex items-center justify-center gap-4 sm:gap-6 transition-all duration-500 max-w-[94vw] sm:max-w-xl ${
+          showFloatingDock ? 'translate-y-0 opacity-100 animate-slide-up' : 'translate-y-20 opacity-0 pointer-events-none'
+        }`}
+      >
+        <span className="text-[9px] text-gold-400 font-mono tracking-widest hidden sm:inline uppercase border-r border-neutral-800 pr-3">
+          ZAYNOVA DOCK:
+        </span>
+        
+        {/* Navigation Action Anchors */}
+        <a 
+          href="#home"
+          onClick={() => trackEvent({ eventType: 'BUTTON_CLICK', eventDetail: 'Scrolled to Home from Floating Dock' })}
+          className="text-gray-400 hover:text-white transition-all hover:scale-105 p-1 rounded-lg flex flex-col items-center gap-0.5 justify-center"
+          title="Scroll to Top"
+        >
+          <Home className="w-4 h-4 cursor-pointer text-gold-300" />
+          <span className="text-[8px] font-outfit uppercase tracking-widest font-normal scale-90">Home</span>
+        </a>
+
+        <a 
+          href="#services"
+          onClick={() => trackEvent({ eventType: 'BUTTON_CLICK', eventDetail: 'Scrolled to Services from Floating Dock' })}
+          className="text-gray-400 hover:text-white transition-all hover:scale-105 p-1 rounded-lg flex flex-col items-center gap-0.5 justify-center"
+          title="Scroll to Services"
+        >
+          <Briefcase className="w-4 h-4 cursor-pointer" />
+          <span className="text-[8px] font-outfit uppercase tracking-widest font-normal scale-90">Services</span>
+        </a>
+
+        <a 
+          href="#projects"
+          onClick={() => trackEvent({ eventType: 'BUTTON_CLICK', eventDetail: 'Scrolled to Projects from Floating Dock' })}
+          className="text-gray-400 hover:text-white transition-all hover:scale-105 p-1 rounded-lg flex flex-col items-center gap-0.5 justify-center"
+          title="Scroll to Projects"
+        >
+          <Grid className="w-4 h-4 cursor-pointer text-gold-400" />
+          <span className="text-[8px] font-outfit uppercase tracking-widest font-normal scale-90">Projects</span>
+        </a>
+
+        {/* Dynamic Image Jump Shortcut -> Direct view to Custom Closet / Modular Kitchen / Wardrobe Images */}
+        <a 
+          href="#gallery"
+          onClick={() => trackEvent({ eventType: 'BUTTON_CLICK', eventDetail: 'Bypassed sections to Gallery Images via Floating Dock' })}
+          className="relative px-3 py-1 bg-gold-950/40 border border-gold-500/40 hover:border-gold-400 rounded-full text-gold-300 hover:text-white transition-all hover:scale-105 flex items-center gap-1.5 cursor-pointer"
+          title="Jump directly to Images"
+        >
+          <span className="relative flex h-1.5 w-1.5">
+            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-gold-400 opacity-75"></span>
+            <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-gold-500"></span>
+          </span>
+          <span className="text-[9px] font-outfit uppercase tracking-widest font-semibold whitespace-nowrap">📸 Photos</span>
+        </a>
+
+        <button 
+          type="button" 
+          onClick={() => {
+            trackEvent({ eventType: 'BUTTON_CLICK', eventDetail: 'Opened Quote Modal from Floating Dock' });
+            openModal('quotation');
+          }}
+          className="px-3.5 py-1 text-[9px] font-outfit uppercase tracking-widest text-white bg-gradient-to-r from-gold-600 to-gold-500 hover:from-gold-500 hover:to-gold-400 rounded-full transition-all hover:scale-105 cursor-pointer font-semibold shadow"
+          title="Request Free Quote"
+        >
+          Quote
+        </button>
+      </div>
 
 
       {/* ---------------- CONVERSION FLOATING DRAWER CONTROLS ---------------- */}

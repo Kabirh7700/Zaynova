@@ -1,46 +1,101 @@
-export interface Service {
-  id: string;
-  title: string;
-  description: string;
-  category: 'interior' | 'renovation' | 'civil' | 'all';
-  iconName: string; // Dynamic rendering via lucide-react names
-  longDescription?: string;
-  features: string[];
-}
+export type LanguageCode = 'en' | 'es' | 'pt' | 'fr' | 'ar' | 'de';
 
-export interface Project {
-  id: string;
-  title: string;
-  location: string;
-  category: 'Living Rooms' | 'Bedrooms' | 'Modular Kitchens' | 'Bathrooms' | 'Office Interiors' | 'False Ceiling Projects' | 'Civil Work Projects' | 'Commercial Projects';
-  image: string;
-  size: string;
-  scope: string;
-}
+export type ProductSegment =
+  | 'Agro-Industrial Machinery'
+  | 'Garden & Forestry'
+  | 'Diesel Machines'
+  | 'Electric Machines'
+  | 'Solar'
+  | 'Spraying & Crop Protection'
+  | 'Water Pumps & Fluid'
+  | 'Engines & Power Generation'
+  | 'Pressure Washing & Cleaning'
+  | 'Air Compressors'
+  | 'Industrial Equipment'
+  | 'Construction Equipment'
+  | 'Wood & Agro Processing'
+  | 'Special Machinery'
+  | 'Power Tools'
+  | 'Hand & Garden Tools'
+  | 'Spare Parts & Aftermarket';
 
-export interface Testimonial {
+export interface ProductPart {
   id: string;
+  partCode: string;
   name: string;
-  projectType: string;
-  review: string;
-  rating: number;
-  image?: string;
+  material: string;
+  functionDesc: string;
+  serviceInterval: string;
+  xPercent: number;
+  yPercent: number;
 }
 
-export interface FAQItem {
+export interface ProductSubModel {
+  sku: string;
+  name: string;
+  powerSpec: string;
+  displacement: string;
+  weight: string;
+  application: string;
+}
+
+export interface ProductItem {
   id: string;
-  question: string;
-  answer: string;
+  sku: string;
+  name: string;
+  category: ProductSegment;
+  powerSpec: string;
+  displacement: string;
+  weight: string;
+  description: string;
+  imageUrl: string;
+  explodedImageUrl?: string;
+  parts?: ProductPart[];
+  subModels?: ProductSubModel[];
+  status: 'In Production' | 'Export Ready' | 'OEM Available';
+  highlights?: string[];
+  // Optional internal export fields (kept optional for CSV compatibility, never rendered publicly)
+  moq?: number;
+  cartonQty?: number;
+  container40HqQty?: number;
+  fobPriceRange?: string;
+  // Optional multilingual fields
+  name_es?: string;
+  name_pt?: string;
+  name_fr?: string;
+  name_ar?: string;
+  name_de?: string;
+  description_es?: string;
+  description_pt?: string;
+  description_fr?: string;
+  description_ar?: string;
+  description_de?: string;
 }
 
-export interface ProcessStep {
-  stepNumber: string;
+export interface CatalogItem {
+  id: string;
   title: string;
+  edition: string;
+  category: string;
+  language: string;
+  pageCount: string;
+  fileSize: string;
   description: string;
-  iconName: string;
+  coverImage: string;
+  downloadUrl: string;
 }
 
-export interface TrustIndicator {
-  title: string;
-  description: string;
+export interface BrandConfig {
+  brandName: string;
+  logoUrl: string;
+  exportEmail: string;
+  hqLocation: string;
+}
+
+export interface SiteDataBundle {
+  products: ProductItem[];
+  catalogs: CatalogItem[];
+  brandConfig: BrandConfig;
+  source: 'default' | 'google-sheet';
+  lastSyncedAt?: string;
 }

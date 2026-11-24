@@ -1,894 +1,675 @@
-import React, { useState, useEffect, FormEvent } from 'react';
-import { 
-  X, Check, Lock, ShieldAlert, Sparkles, RefreshCw, Search, Trash2, 
-  Copy, ExternalLink, Eye, EyeOff, UserCheck, Smartphone, Mail, 
-  FileSpreadsheet, TrendingUp, BarChart3, Database, ChevronRight, CheckCircle2,
-  MousePointerClick, Trophy, Activity, HelpCircle, Eye as ViewIcon, Compass
+import { FormEvent, useEffect, useState } from 'react';
+import {
+  BarChart3,
+  Calendar,
+  Check,
+  Copy,
+  Database,
+  Download,
+  Eye,
+  EyeOff,
+  FileSpreadsheet,
+  Globe,
+  Lock,
+  RefreshCw,
+  Search,
+  ShieldAlert,
+  Trash2,
+  Users,
+  X,
 } from 'lucide-react';
-import { getLocalLogs, clearLocalLogs, fetchRemoteLogs } from '../utils/analytics';
+import {
+  APPS_SCRIPT_URL,
+  clearLocalLogs,
+  fetchRemoteLogs,
+  getLocalLogs,
+  StoredAnalyticsLog,
+} from '../utils/analytics';
+import {
+  ALL_IN_ONE_APPS_SCRIPT,
+  downloadProductsCsvTemplate,
+  getActiveAppsScriptUrl,
+  getLocalLogoOverride,
+  setCustomAppsScriptUrl,
+  setLocalLogoOverride,
+} from '../utils/sheetsSync';
+import { ProductItem } from '../types';
 
 interface AdminDashboardProps {
   isOpen: boolean;
+  products: ProductItem[];
+  sheetSource: 'default' | 'google-sheet';
   onClose: () => void;
+  onRefreshSiteData: () => Promise<void>;
 }
 
-export default function AdminDashboard({ isOpen, onClose }: AdminDashboardProps) {
+export default function AdminDashboard({
+  isOpen,
+  products,
+  sheetSource,
+  onClose,
+  onRefreshSiteData,
+}: AdminDashboardProps) {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [passcode, setPasscode] = useState('');
   const [showPasscode, setShowPasscode] = useState(false);
   const [loginError, setLoginError] = useState('');
-  
-  // Data state
-  const [logs, setLogs] = useState<any[]>([]);
+
+  const [activeSection, setActiveSection] = useState<'analytics' | 'cms'>('analytics');
+  const [logs, setLogs] = useState<StoredAnalyticsLog[]>([]);
   const [dataSource, setDataSource] = useState<'local' | 'sheets'>('local');
   const [searchQuery, setSearchQuery] = useState('');
-  const [filterType, setFilterType] = useState<'ALL' | 'PAGE_VIEW' | 'BUTTON_CLICK' | 'FORM_SUBMISSION'>('ALL');
-  
-  // Loading & Action states
+  const [filterType, setFilterType] = useState<string>('ALL');
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
-  const [copiedScript, setCopiedScript] = useState(false);
-  const [showAppsScriptGuide, setShowAppsScriptGuide] = useState(false);
 
-  // Load data & sanitize blank rows (such as rows deleted or cleared on Google Sheets)
-  const loadData = async (forceSource?: 'local' | 'sheets') => {
+  const [logoInput, setLogoInput] = useState(() => getLocalLogoOverride());
+  const [endpointInput, setEndpointInput] = useState(() => getActiveAppsScriptUrl());
+  const [cmsSavedMsg, setCmsSavedMsg] = useState('');
+  const [copiedScript, setCopiedScript] = useState(false);
+
+  const loadLogs = async (forceSource?: 'local' | 'sheets') => {
     setIsRefreshing(true);
     setErrorMessage('');
     const source = forceSource || dataSource;
-    
-    const filterValidLogs = (items: any[]) => {
-      return (items || []).filter(log => 
-        log && 
-        log.timestamp && String(log.timestamp).trim() !== '' &&
-        log.eventType && String(log.eventType).trim() !== ''
-      );
-    };
 
     if (source === 'sheets') {
       try {
-        const remoteData = await fetchRemoteLogs();
-        setLogs(filterValidLogs(remoteData));
-      } catch (err) {
-        setErrorMessage('Failed to fetch from Google Sheets direct API. Reading local cache fallback instead.');
+        const remote = await fetchRemoteLogs();
+        setLogs(
+          (remote || []).filter(
+            (r: any) =>
+              r && (r.timestamp || r.Timestamp) && (r.eventType || r['Event Type'])
+          )
+        );
+      } catch {
+        setErrorMessage(
+          'Live Google Sheet GET feed requires the updated All-in-One Apps Script in the CMS tab. Showing local session telemetry.'
+        );
         setDataSource('local');
-        setLogs(filterValidLogs(getLocalLogs()));
+        setLogs(getLocalLogs());
       } finally {
         setIsRefreshing(false);
       }
     } else {
-      setLogs(filterValidLogs(getLocalLogs()));
-      // Introduce a premium micro-spinner delay for authentic feedback
-      setTimeout(() => {
-        setIsRefreshing(false);
-      }, 500);
+      setLogs(getLocalLogs());
+      setTimeout(() => setIsRefreshing(false), 300);
     }
   };
 
-  // Reload logs on authentication or change in source
   useEffect(() => {
     if (isAuthenticated && isOpen) {
-      loadData();
+      loadLogs();
     }
   }, [isAuthenticated, isOpen, dataSource]);
 
-  const handleLoginSubmit = (e: React.FormEvent) => {
+  if (!isOpen) return null;
+
+  const handleLogin = (e: FormEvent) => {
     e.preventDefault();
-    const cleanPass = passcode.trim().toLowerCase();
-    
-    // Accepts the mobile prefix '87500' or the boutique name 'zaynova'
-    if (cleanPass === '87500' || cleanPass === 'zaynova' || cleanPass === 'kabir7700') {
+    const clean = passcode.trim().toLowerCase();
+    if (clean === 'zaynova' || clean === '87500') {
       setIsAuthenticated(true);
       setLoginError('');
     } else {
-      setLoginError('Invalid Administrator Access Code. Access Denied.');
+      setLoginError('Invalid access code. Use your ZAYNOVA admin passcode.');
     }
   };
 
-  const handleClearLogs = () => {
-    if (window.confirm('Do you really want to clear the local testing logs? Note: This will not delete entries on your Google Sheets.')) {
-      clearLocalLogs();
-      loadData('local');
-    }
+  const handleSaveLogoPreview = async () => {
+    setLocalLogoOverride(logoInput);
+    await onRefreshSiteData();
+    setCmsSavedMsg('Brand logo updated across header, footer & catalogs.');
+    setTimeout(() => setCmsSavedMsg(''), 3000);
   };
 
-  // Allows removing a single log row from the current dashboard state & client-side database (localStorage)
-  const handleDeleteIndividualLog = (logToDelete: any) => {
-    if (window.confirm('Are you sure you want to remove this log entry from your view? Note: If this came from Google Sheets, please also delete the row directly in your Google Spreadsheet to prevent it from re-appearing on the next sync.')) {
-      // 1. Remove from local component state logs
-      const updatedLogs = logs.filter((l: any) => l !== logToDelete);
-      setLogs(updatedLogs);
-      
-      // 2. Also remove from local zaynova_analytics_logs if it is stored in localStorage
-      try {
-        const localLogs = getLocalLogs();
-        const updatedLocal = localLogs.filter((l: any) => {
-          const matches = l.timestamp === logToDelete.timestamp && 
-                          l.eventType === logToDelete.eventType && 
-                          l.eventDetail === logToDelete.eventDetail;
-          return !matches;
-        });
-        localStorage.setItem("zaynova_analytics_logs", JSON.stringify(updatedLocal));
-      } catch (err) {
-        console.warn("Could not clean log from localStorage:", err);
-      }
-    }
+  const handleSaveEndpoint = async () => {
+    setCustomAppsScriptUrl(endpointInput);
+    await onRefreshSiteData();
+    setCmsSavedMsg('Google Apps Script endpoint updated and resynced.');
+    setTimeout(() => setCmsSavedMsg(''), 3000);
   };
 
-  // Upgraded dynamic Apps Script that supports POST (writes) and GET (fetches rows) simultaneously!
-  const upgradedAppsScriptCode = `// ZAYNOVA DUAL-MODE ENTERPRISE GOOGLE SHEETS CONNECTOR (Supports Writes & Real-Time Reads)
-function doPost(e) {
-  try {
-    var sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
-    var data = JSON.parse(e.postData.contents);
-    
-    // Add headers if sheet is empty
-    if (sheet.getLastRow() === 0) {
-      sheet.appendRow([
-        "Timestamp", "Event Type", "Event Detail", "Client Name", 
-        "Contact Mobile", "Email Address", "Project Type", "Inquiry Number", 
-        "Area Size SqFt", "Quality Grade", "Calculated Budget", "Message", 
-        "IP Address", "Location", "ISP"
-      ]);
-    }
-    
-    // Append data row
-    sheet.appendRow([
-      data["Timestamp"] || data["timestamp"] || new Date().toLocaleString("en-IN", { timeZone: "Asia/Kolkata" }),
-      data["Event Type"] || data["eventType"] || "",
-      data["Event Detail"] || data["eventDetail"] || "",
-      data["Client Name"] || data["clientName"] || "",
-      data["Client Phone"] || data["clientPhone"] || "",
-      data["Client Email"] || data["clientEmail"] || "",
-      data["Project Type"] || data["projectType"] || "",
-      data["Inquiry Number"] || data["inquiryNum"] || "",
-      data["Area Size SqFt"] || data["areaSizeSqFt"] || "",
-      data["Quality Grade"] || data["qualityGrade"] || "",
-      data["Calculated Budget"] || data["calculatedBudget"] || "",
-      data["Message"] || data["message"] || "",
-      data["IP Address"] || data["visitorIp"] || "",
-      data["Location"] || data["visitorLocation"] || "",
-      data["ISP"] || data["visitorIsp"] || ""
-    ]);
-    
-    return ContentService.createTextOutput(JSON.stringify({ result: "success", info: "Row Appended successfully" }))
-      .setMimeType(ContentService.MimeType.JSON);
-  } catch (error) {
-    return ContentService.createTextOutput(JSON.stringify({ result: "error", error: error.toString() }))
-      .setMimeType(ContentService.MimeType.JSON);
-  }
-}
-
-// Support GET requests so the website admin console can view tracked logs in real-time
-function doGet(e) {
-  try {
-    var sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
-    var lastRow = sheet.getLastRow();
-    var lastColumn = sheet.getLastColumn();
-    
-    if (lastRow <= 1) {
-      return ContentService.createTextOutput(JSON.stringify([]))
-        .setMimeType(ContentService.MimeType.JSON);
-    }
-    
-    var headers = sheet.getRange(1, 1, 1, lastColumn).getValues()[0];
-    var dataRange = sheet.getRange(2, 1, lastRow - 1, lastColumn);
-    var values = dataRange.getValues();
-    var resultList = [];
-    
-    // Reverse loop to get newest submissions first
-    for (var i = values.length - 1; i >= 0; i--) {
-      // Skip empty or cleared rows (checks if Timestamp/col1 is blank)
-      if (!values[i][0] || values[i][0].toString().trim() === "") {
-        continue;
-      }
-      var obj = {};
-      for (var j = 0; j < headers.length; j++) {
-        var headerKey = headers[j];
-        var val = values[i][j];
-        
-        // Match frontend expected keys
-        if (headerKey === "Timestamp") obj.timestamp = val;
-        else if (headerKey === "Event Type") obj.eventType = val;
-        else if (headerKey === "Event Detail") obj.eventDetail = val;
-        else if (headerKey === "Client Name") obj.clientName = val;
-        else if (headerKey === "Contact Mobile") obj.clientPhone = val;
-        else if (headerKey === "Email Address") obj.clientEmail = val;
-        else if (headerKey === "Project Type") obj.projectType = val;
-        else if (headerKey === "Inquiry Number") obj.inquiryNum = val;
-        else if (headerKey === "Area Size SqFt") obj.areaSizeSqFt = val;
-        else if (headerKey === "Quality Grade") obj.qualityGrade = val;
-        else if (headerKey === "Calculated Budget") obj.calculatedBudget = val;
-        else if (headerKey === "Message") obj.message = val;
-        else if (headerKey === "IP Address") obj.visitorIp = val;
-        else if (headerKey === "Location") obj.visitorLocation = val;
-        else if (headerKey === "ISP") obj.visitorIsp = val;
-        else obj[headerKey] = val;
-      }
-      resultList.push(obj);
-    }
-    
-    return ContentService.createTextOutput(JSON.stringify(resultList))
-      .setMimeType(ContentService.MimeType.JSON);
-  } catch (err) {
-    return ContentService.createTextOutput(JSON.stringify({ error: err.toString() }))
-      .setMimeType(ContentService.MimeType.JSON);
-  }
-}`;
-
-  const copyScriptToClipboard = () => {
-    navigator.clipboard.writeText(upgradedAppsScriptCode);
+  const handleCopyScript = () => {
+    navigator.clipboard.writeText(ALL_IN_ONE_APPS_SCRIPT);
     setCopiedScript(true);
-    setTimeout(() => setCopiedScript(false), 2000);
+    setTimeout(() => setCopiedScript(false), 2500);
   };
 
-  if (!isOpen) return null;
-
-  // Filter & Search computation
-  const filteredLogs = logs.filter(log => {
-    const matchesFilter = filterType === 'ALL' || log.eventType === filterType;
-    
-    const searchString = searchQuery.toLowerCase();
-    const rawMatch = !searchQuery || 
-      (log.clientName || '').toLowerCase().includes(searchString) ||
-      (log.clientPhone || '').toLowerCase().includes(searchString) ||
-      (log.clientEmail || '').toLowerCase().includes(searchString) ||
-      (log.eventType || '').toLowerCase().includes(searchString) ||
-      (log.eventDetail || '').toLowerCase().includes(searchString) ||
-      (log.projectType || '').toLowerCase().includes(searchString) ||
-      (log.visitorLocation || '').toLowerCase().includes(searchString) ||
-      (log.inquiryNum || '').toLowerCase().includes(searchString) ||
-      (log.message || '').toLowerCase().includes(searchString);
-
-    return matchesFilter && rawMatch;
-  });
-
-  // Calculate high quality stats aggregates (skipping empty or cleared rows)
-  const rawDataForStats = (dataSource === 'local' ? getLocalLogs() : logs).filter((log: any) => 
-    log && 
-    log.timestamp && String(log.timestamp).trim() !== '' &&
-    log.eventType && String(log.eventType).trim() !== ''
-  );
-  const pageViewsCount = rawDataForStats.filter(l => l.eventType === 'PAGE_VIEW').length;
-  const engagementClicksCount = rawDataForStats.filter(l => l.eventType === 'BUTTON_CLICK').length;
-  const formLeadsCount = rawDataForStats.filter(l => l.eventType === 'FORM_SUBMISSION').length;
-  const totalSystemHits = rawDataForStats.length;
-  const conversionRate = pageViewsCount > 0 
-    ? ((formLeadsCount / pageViewsCount) * 100).toFixed(1) 
-    : "0.0";
-
-  // Dynamic ranking logic: Group click/interaction details by popularity count
-  const actionPopularity: { [key: string]: number } = {};
-  const locationPopularity: { [key: string]: number } = {};
-  const projectPopularity: { [key: string]: number } = {};
-
-  rawDataForStats.forEach(log => {
-    if (log.eventType === 'BUTTON_CLICK' && log.eventDetail) {
-      actionPopularity[log.eventDetail] = (actionPopularity[log.eventDetail] || 0) + 1;
+  // Aggregate unique visitors & max visit counts
+  const visitorMap = new Map<
+    string,
+    {
+      visitorId: string;
+      maxVisitCount: number;
+      country: string;
+      location: string;
+      ip: string;
+      lastLanguage: string;
+      options: Set<string>;
+      lastSeen: string;
+      eventsCount: number;
     }
-    if (log.visitorLocation) {
-      locationPopularity[log.visitorLocation] = (locationPopularity[log.visitorLocation] || 0) + 1;
-    }
-    if (log.projectType && log.projectType !== 'N/A') {
-      projectPopularity[log.projectType] = (projectPopularity[log.projectType] || 0) + 1;
+  >();
+
+  logs.forEach((log: any) => {
+    const vid = String(log.visitorId || log['Visitor ID'] || 'UNKNOWN');
+    const vCount = Number(log.visitCount || log['Visit Count'] || 1) || 1;
+    const existing = visitorMap.get(vid);
+    const opts = String(log.selectedOptions || log['Selected Options'] || '')
+      .split('|')
+      .map((s) => s.trim())
+      .filter(Boolean);
+
+    if (!existing) {
+      visitorMap.set(vid, {
+        visitorId: vid,
+        maxVisitCount: vCount,
+        country: String(log.country || log.Country || log.visitorLocation || 'Global'),
+        location: String(log.visitorLocation || log.Location || 'Global'),
+        ip: String(log.visitorIp || log['IP Address'] || ''),
+        lastLanguage: String(log.language || log.Language || 'EN'),
+        options: new Set(opts),
+        lastSeen: String(log.timestamp || log.Timestamp || ''),
+        eventsCount: 1,
+      });
+    } else {
+      existing.maxVisitCount = Math.max(existing.maxVisitCount, vCount);
+      existing.eventsCount += 1;
+      opts.forEach((o) => existing.options.add(o));
     }
   });
 
-  // Convert to sorted lists
-  const sortedActions = Object.entries(actionPopularity)
-    .map(([detail, count]) => ({ detail, count }))
-    .sort((a, b) => b.count - a.count)
-    .slice(0, 5);
+  const uniqueVisitors = Array.from(visitorMap.values());
+  const totalQuotes = logs.filter(
+    (l: any) => (l.eventType || l['Event Type']) === 'BULK_QUOTE_SUBMIT'
+  ).length;
+  const totalMeetings = logs.filter(
+    (l: any) => (l.eventType || l['Event Type']) === 'MEETING_BOOKING'
+  ).length;
+  const totalDownloads = logs.filter(
+    (l: any) => (l.eventType || l['Event Type']) === 'CATALOG_DOWNLOAD'
+  ).length;
 
-  const sortedLocations = Object.entries(locationPopularity)
-    .map(([loc, count]) => ({ loc, count }))
-    .sort((a, b) => b.count - a.count)
-    .slice(0, 4);
-
-  const sortedProjects = Object.entries(projectPopularity)
-    .map(([proj, count]) => ({ proj, count }))
-    .sort((a, b) => b.count - a.count)
-    .slice(0, 4);
+  const filteredLogs = logs.filter((log: any) => {
+    const eType = String(log.eventType || log['Event Type'] || '');
+    const matchesFilter = filterType === 'ALL' || eType === filterType;
+    const q = searchQuery.toLowerCase();
+    if (!q) return matchesFilter;
+    const blob = JSON.stringify(log).toLowerCase();
+    return matchesFilter && blob.includes(q);
+  });
 
   return (
-    <div id="zaynova-admin-portal" className="fixed inset-0 z-50 overflow-y-auto bg-black/95 backdrop-blur-md flex items-center justify-center p-4 md:p-6 animate-fade-in">
-      <div className="bg-neutral-950 border border-neutral-800 rounded-2xl w-full max-w-6xl shadow-2xl overflow-hidden relative max-h-[95vh] flex flex-col">
-        
-        {/* Banner Glow Decorative Lines */}
-        <div className="absolute top-0 left-0 right-0 h-[3px] bg-gradient-to-r from-gold-600 via-gold-400 to-emerald-500" />
-
-        {/* Modal Header */}
-        <div className="p-6 border-b border-neutral-900 bg-neutral-950/80 flex items-center justify-between sticky top-0 z-20">
-          <div className="flex items-center gap-2.5">
-            <div className="h-2 w-2 rounded-full bg-gold-400 animate-pulse" />
-            <div>
-              <h2 className="font-outfit text-white text-md tracking-widest font-semibold uppercase flex items-center gap-2">
-                ZAYNOVA <span className="text-gold-400 text-xs font-light">Interactive Analytics & Security Desk</span>
-              </h2>
-              <p className="text-[10px] text-gray-500 font-mono tracking-normal mt-0.5">
-                Bespoke Luxury Architecture Visitor & Click Action Intelligence Console
-              </p>
-            </div>
+    <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
+      <div className="bg-white border border-[#E1E4E8] rounded-xl w-full max-w-6xl max-h-[92vh] overflow-hidden shadow-2xl flex flex-col">
+        {/* Header */}
+        <div className="px-6 py-4 bg-[#121518] text-white flex items-center justify-between shrink-0">
+          <div>
+            <h2 className="font-display text-base font-bold tracking-tight">
+              ZAYNOVA Executive Analytics &amp; Google Sheet CMS
+            </h2>
+            <p className="text-xs text-gray-400 mt-0.5">
+              Visitor Frequency · Option Selections · Spreadsheet Product, Part &amp; Logo Sync
+            </p>
           </div>
-          <button 
+          <button
             type="button"
             onClick={onClose}
-            className="p-1.5 rounded-full bg-neutral-900 hover:bg-neutral-800 text-gray-400 hover:text-white transition-all cursor-pointer"
-            title="Exit System Console"
+            className="p-2 rounded-lg text-gray-400 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
+            aria-label="Close Admin Panel"
           >
             <X className="w-5 h-5" />
           </button>
         </div>
 
-        {/* Content Box */}
         {!isAuthenticated ? (
-          /* SECURITY VAULT PASSCODE SCREEN */
-          <div className="flex-1 p-8 py-20 flex flex-col items-center justify-center max-w-md mx-auto text-center">
-            <div className="h-16 w-16 rounded-2xl bg-neutral-900/50 border border-neutral-800 flex items-center justify-center text-gold-400 shadow-xl mb-6">
-              <Lock className="w-8 h-8 animate-pulse text-gold-500" />
+          <div className="p-8 md:p-14 max-w-md mx-auto text-center space-y-5">
+            <div className="w-12 h-12 rounded-xl bg-[#F1F3F6] border border-[#E1E4E8] flex items-center justify-center mx-auto text-[#111417]">
+              <Lock className="w-6 h-6 text-[#387500]" />
             </div>
-            
-            <h3 className="font-outfit text-white text-lg uppercase tracking-widest font-semibold">
-              Administrator Verification Required
-            </h3>
-            <p className="text-xs text-gray-400 mt-2 leading-relaxed">
-              Enter the secure administrator access code to display tracking reports, action leaderboards, city metrics, and form leads databases.
-            </p>
-
-            <form onSubmit={handleLoginSubmit} className="w-full mt-6 space-y-4">
+            <div>
+              <h3 className="font-display text-lg font-bold text-[#111417]">
+                Administrator Access
+              </h3>
+              <p className="text-xs text-[#525B66] mt-1">
+                Enter your ZAYNOVA passcode to view repeat visitor counts, selected options, and Google Sheet sync controls.
+              </p>
+            </div>
+            <form onSubmit={handleLogin} className="space-y-3">
               <div className="relative">
-                <input 
-                  type={showPasscode ? "text" : "password"}
+                <input
+                  type={showPasscode ? 'text' : 'password'}
                   value={passcode}
                   onChange={(e) => setPasscode(e.target.value)}
-                  placeholder="Enter access code"
-                  required
-                  className="w-full bg-neutral-900/65 border border-neutral-800 focus:border-gold-500 rounded-xl py-3.5 pl-4 pr-12 text-center text-white text-sm outline-none transition-all font-mono tracking-widest"
+                  placeholder="Passcode (zaynova)"
+                  className="w-full rounded-lg border border-[#E1E4E8] px-4 py-2.5 text-sm text-center font-mono focus:outline-none focus:border-[#4D9E00]"
                   autoFocus
                 />
                 <button
                   type="button"
                   onClick={() => setShowPasscode(!showPasscode)}
-                  className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-500 hover:text-white transition-colors"
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-[#525B66] hover:text-[#111417] cursor-pointer"
                 >
                   {showPasscode ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                 </button>
               </div>
-
               {loginError && (
-                <div className="flex items-center gap-2 bg-red-950/20 border border-red-900/50 rounded-xl p-3 text-red-400 text-xs justify-center">
-                  <ShieldAlert className="w-4 h-4 shrink-0" />
+                <div className="text-xs text-red-600 flex items-center justify-center gap-1.5">
+                  <ShieldAlert className="w-4 h-4" />
                   <span>{loginError}</span>
                 </div>
               )}
-
-              <button 
+              <button
                 type="submit"
-                className="w-full bg-gradient-to-r from-gold-600 to-gold-400 hover:scale-[1.02] active:scale-95 text-white font-outfit uppercase tracking-widest text-xs font-semibold py-3.5 rounded-xl shadow-lg transition-all cursor-pointer gold-shadow"
+                className="w-full py-2.5 rounded-lg bg-[#111417] hover:bg-[#1C2024] text-white text-sm font-semibold cursor-pointer"
               >
-                Unlock Administrator Stream
+                Unlock Console
               </button>
             </form>
           </div>
         ) : (
-          /* CORE ADMIN METRICS & EVENT LOOPS SCREEN */
-          <div className="flex-1 overflow-y-auto flex flex-col min-h-0 bg-neutral-950">
-            
-            {/* STATS OVERVIEW CONTROLLERS ROW */}
-            <div className="p-6 bg-gradient-to-b from-neutral-930 to-neutral-950/20 border-b border-neutral-900 grid grid-cols-2 lg:grid-cols-4 gap-4">
-              
-              {/* Stat Card 1: Visitors */}
-              <div className="bg-neutral-900/40 border border-neutral-800/60 p-4 rounded-xl flex items-center justify-between relative group hover:border-neutral-750 transition-all">
-                <div>
-                  <span className="text-[10px] text-gray-500 uppercase font-outfit tracking-wider">Total Browser Entries</span>
-                  <div className="font-mono font-bold text-2xl text-white mt-1">{pageViewsCount}</div>
-                  <p className="text-[9px] text-gray-400 mt-1 flex items-center gap-1">
-                    <TrendingUp className="w-2.5 h-2.5 text-emerald-400" /> 
-                    Live sessions logged
-                  </p>
-                </div>
-                <div className="h-10 w-10 rounded-lg bg-neutral-950 flex items-center justify-center text-gray-400">
-                  <BarChart3 className="w-5 h-5 text-gold-500" />
-                </div>
-              </div>
-
-              {/* Stat Card 2: Interactive Actions */}
-              <div className="bg-neutral-900/40 border border-neutral-800/60 p-4 rounded-xl flex items-center justify-between relative group hover:border-neutral-750 transition-all">
-                <div>
-                  <span className="text-[10px] text-gray-500 uppercase font-outfit tracking-wider">Interactive Clicks</span>
-                  <div className="font-mono font-bold text-2xl text-white mt-1">{engagementClicksCount}</div>
-                  <p className="text-[9px] text-sky-400 mt-1 flex items-center gap-1">
-                    <MousePointerClick className="w-2.5 h-2.5 text-sky-400" />
-                    Clicks from A to Z
-                  </p>
-                </div>
-                <div className="h-10 w-10 rounded-lg bg-neutral-950 flex items-center justify-center text-gray-400">
-                  <Smartphone className="w-5 h-5 text-emerald-400" />
-                </div>
-              </div>
-
-              {/* Stat Card 3: Form Leads Submitted */}
-              <div className="bg-neutral-900/40 border border-neutral-800/60 p-4 rounded-xl flex items-center justify-between relative group hover:border-neutral-750 transition-all">
-                <div>
-                  <span className="text-[10px] text-gray-500 uppercase font-outfit tracking-wider">Form Leads Captured</span>
-                  <div className="font-mono font-bold text-2xl text-gold-400 mt-1">{formLeadsCount}</div>
-                  <p className="text-[9px] text-gold-400 mt-1 flex items-center gap-1">
-                    <Database className="w-2.5 h-2.5 text-gold-500" /> 
-                    Spreadsheet synced
-                  </p>
-                </div>
-                <div className="h-10 w-10 rounded-lg bg-neutral-950 flex items-center justify-center text-gold-400">
-                  <FileSpreadsheet className="w-5 h-5 text-gold-500" />
-                </div>
-              </div>
-
-              {/* Stat Card 4: Session conversion Ratio */}
-              <div className="bg-neutral-900/40 border border-neutral-800/60 p-4 rounded-xl flex items-center justify-between relative group hover:border-neutral-750 transition-all">
-                <div>
-                  <span className="text-[10px] text-gray-500 uppercase font-outfit tracking-wider">Conversion Ratio</span>
-                  <div className="font-mono font-bold text-2xl text-emerald-400 mt-1">{conversionRate}%</div>
-                  <p className="text-[9px] text-gray-400 mt-1">Visits vs. Lead signups</p>
-                </div>
-                <div className="h-10 w-10 rounded-lg bg-neutral-950 flex items-center justify-center text-emerald-400">
-                  <UserCheck className="w-5 h-5 text-emerald-400" />
-                </div>
-              </div>
-            </div>
-
-            {/* DYNAMIC METRIC INTERACTIVE CHARTS / LEADERBOARD BENTO */}
-            <div className="mx-6 mt-6 grid grid-cols-1 lg:grid-cols-3 gap-6">
-              
-              {/* Leaderboard: Popular Button Clicks / Dynamic Actions */}
-              <div className="bg-neutral-900/30 border border-neutral-900 p-5 rounded-2xl flex flex-col justify-between">
-                <div>
-                  <div className="flex items-center gap-2 mb-4">
-                    <Trophy className="w-4 h-4 text-gold-400" />
-                    <h4 className="font-outfit text-white text-xs uppercase tracking-widest font-semibold">
-                      ACTION ENGAGEMENTS RANKING
-                    </h4>
-                  </div>
-                  
-                  {sortedActions.length === 0 ? (
-                    <p className="text-[11px] text-gray-500 italic py-4">No click interactions recorded yet. Click some CTAs on the site to trigger!</p>
-                  ) : (
-                    <div className="space-y-3">
-                      {sortedActions.map((item, index) => (
-                        <div key={index} className="flex items-center gap-2.5 justify-between">
-                          <div className="flex items-center gap-2 min-w-0">
-                            <span className="w-4 h-4 rounded bg-neutral-800 text-[9px] font-bold text-gray-400 flex items-center justify-center font-mono">
-                              {index + 1}
-                            </span>
-                            <span className="text-[11px] text-gray-300 truncate" title={item.detail}>
-                              {item.detail}
-                            </span>
-                          </div>
-                          <span className="px-1.5 py-0.5 rounded bg-sky-950/40 text-sky-400 text-[10px] font-mono font-bold shrink-0">
-                            {item.count} clicks
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-                <div className="text-[9px] text-gray-500 font-mono mt-4 pt-3 border-t border-neutral-900/60 flex items-center justify-between">
-                  <span>A TO Z BUTTON METER ENGINE</span>
-                  <span className="text-gold-400">UPDATED REAL-TIME</span>
-                </div>
-              </div>
-
-              {/* Geo location stats */}
-              <div className="bg-neutral-900/30 border border-neutral-900 p-5 rounded-2xl flex flex-col justify-between">
-                <div>
-                  <div className="flex items-center gap-2 mb-4">
-                    <Activity className="w-4 h-4 text-emerald-400" />
-                    <h4 className="font-outfit text-white text-xs uppercase tracking-widest font-semibold">
-                      VISITOR GEO LOCATIONS
-                    </h4>
-                  </div>
-
-                  {sortedLocations.length === 0 ? (
-                    <p className="text-[11px] text-gray-500 italic py-4">Location stats empty</p>
-                  ) : (
-                    <div className="space-y-3">
-                      {sortedLocations.map((item, index) => (
-                        <div key={index} className="space-y-1">
-                          <div className="flex justify-between text-[11px] text-gray-300">
-                            <span className="truncate">📍 {item.loc}</span>
-                            <span className="font-mono text-gray-400">{item.count} visitors</span>
-                          </div>
-                          <div className="w-full bg-neutral-900 h-1 rounded-full overflow-hidden">
-                            <div 
-                              className="bg-emerald-500 h-full rounded-full transition-all duration-500" 
-                              style={{ width: `${(item.count / Math.max(...sortedLocations.map(l => l.count))) * 100}%` }}
-                            />
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-                <div className="text-[9px] text-gray-500 font-mono mt-4 pt-3 border-t border-neutral-900/60 flex items-center justify-between">
-                  <span>IP LOCATION TELEMETRY</span>
-                  <span className="text-emerald-400">ACTIVE IP LOCATOR</span>
-                </div>
-              </div>
-
-              {/* Product stream popularity */}
-              <div className="bg-neutral-900/30 border border-neutral-900 p-5 rounded-2xl flex flex-col justify-between">
-                <div>
-                  <div className="flex items-center gap-2 mb-4">
-                    <Compass className="w-4 h-4 text-gold-400" />
-                    <h4 className="font-outfit text-white text-xs uppercase tracking-widest font-semibold">
-                      POPULAR DESIGN STREAMS
-                    </h4>
-                  </div>
-
-                  {sortedProjects.length === 0 ? (
-                    <p className="text-[11px] text-gray-500 italic py-4">No project inquiry submissions catalogued yet.</p>
-                  ) : (
-                    <div className="space-y-3">
-                      {sortedProjects.map((item, index) => (
-                        <div key={index} className="space-y-1">
-                          <div className="flex justify-between text-[11px] text-gray-300">
-                            <span className="truncate">✦ {item.proj}</span>
-                            <span className="font-mono font-bold text-gold-400">{item.count} leads</span>
-                          </div>
-                          <div className="w-full bg-neutral-900 h-1.5 rounded-full overflow-hidden">
-                            <div 
-                              className="bg-gradient-to-r from-gold-600 to-gold-400 h-full rounded-full transition-all duration-500" 
-                              style={{ width: `${(item.count / Math.max(...sortedProjects.map(p => p.count))) * 100}%` }}
-                            />
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-                <div className="text-[9px] text-gray-500 font-mono mt-4 pt-3 border-t border-neutral-900/60 flex items-center justify-between">
-                  <span>STREAM ATTRACTION SCORE</span>
-                  <span className="text-gold-400">METAPLANNER SYNC</span>
-                </div>
-              </div>
-
-            </div>
-
-            {/* ACTION CENTER PANEL & DATA-SOURCE SWITCHERS */}
-            <div className="p-6 bg-neutral-950/60 border-b border-neutral-900/80 flex flex-col md:flex-row gap-4 justify-between items-stretch md:items-center mt-4">
-              
-              {/* Data Source Toggle */}
-              <div className="flex bg-neutral-900 p-1 rounded-xl self-start gap-1">
-                <button 
-                  onClick={() => setDataSource('local')}
-                  className={`px-4 py-2 rounded-lg text-xs font-semibold transition-all cursor pointer ${
-                    dataSource === 'local' 
-                      ? 'bg-gradient-to-r from-gold-600 to-gold-400 text-white shadow' 
-                      : 'text-gray-400 hover:text-white'
+          <div className="flex-1 overflow-y-auto flex flex-col min-h-0">
+            {/* Section Switcher Bar */}
+            <div className="px-6 py-3 border-b border-[#E1E4E8] bg-[#F8F9FA] flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-center gap-1 bg-[#E1E4E8]/60 p-1 rounded-lg">
+                <button
+                  type="button"
+                  onClick={() => setActiveSection('analytics')}
+                  className={`px-3.5 py-1.5 rounded-md text-xs font-semibold transition-colors cursor-pointer ${
+                    activeSection === 'analytics'
+                      ? 'bg-white text-[#111417] shadow-sm'
+                      : 'text-[#525B66] hover:text-[#111417]'
                   }`}
                 >
-                  Local Testing Logs
+                  Visitor &amp; Option Telemetry
                 </button>
-                <button 
-                  onClick={() => {
-                    setDataSource('sheets');
-                  }}
-                  className={`px-4 py-2 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 cursor-pointer ${
-                    dataSource === 'sheets' 
-                      ? 'bg-gradient-to-r from-gold-600 to-gold-400 text-white shadow' 
-                      : 'text-gray-400 hover:text-white'
+                <button
+                  type="button"
+                  onClick={() => setActiveSection('cms')}
+                  className={`px-3.5 py-1.5 rounded-md text-xs font-semibold transition-colors cursor-pointer ${
+                    activeSection === 'cms'
+                      ? 'bg-white text-[#111417] shadow-sm'
+                      : 'text-[#525B66] hover:text-[#111417]'
                   }`}
                 >
-                  <Database className="w-3.5 h-3.5" />
-                  Google Sheet Live
+                  Google Sheet CMS &amp; Brand Logo
                 </button>
               </div>
 
-              {/* Central Actions: Clean log, refresh stats, upgrade instructions */}
-              <div className="flex flex-wrap items-center gap-2.5">
-                <button 
-                  onClick={() => setShowAppsScriptGuide(!showAppsScriptGuide)}
-                  className="px-3.5 py-2 bg-neutral-900 border border-neutral-800 hover:bg-neutral-800 text-gray-300 hover:text-gold-400 rounded-xl text-xs font-medium transition-colors flex items-center gap-1.5 cursor-pointer"
-                >
-                  <Sparkles className="w-3.5 h-3.5 text-gold-500" />
-                  Spreadsheet Fetch Setup Guide
-                </button>
-                
-                <button 
-                  onClick={handleClearLogs}
-                  className="p-2 bg-neutral-900 border border-neutral-800 hover:border-red-900/30 text-gray-400 hover:text-red-400 rounded-xl transition-all cursor-pointer"
-                  title="Clear Local Cache Log Entries"
-                >
-                  <Trash2 className="w-4 h-4" />
-                </button>
-
-                <button 
-                  onClick={() => loadData()}
-                  disabled={isRefreshing}
-                  className="px-3.5 py-2 bg-neutral-900 hover:bg-neutral-800 border border-neutral-800 text-gray-200 rounded-xl text-xs font-medium transition-all flex items-center gap-2 cursor-pointer"
-                >
-                  <RefreshCw className={`w-3.5 h-3.5 text-gold-500 ${isRefreshing ? 'animate-spin' : ''}`} />
-                  {isRefreshing ? 'Polling Feed...' : 'Sync Raw rows'}
-                </button>
+              <div className="text-xs text-[#525B66] flex items-center gap-2">
+                <span>Active Data Source:</span>
+                <span className="font-mono font-semibold text-[#111417]">
+                  {sheetSource === 'google-sheet' ? 'Google Sheets Live' : 'Factory Catalog'}
+                </span>
               </div>
             </div>
 
-            {/* APPS SCRIPT UPGRADE MODULE - OPEN ON TOGGLE */}
-            {showAppsScriptGuide && (
-              <div className="m-6 p-6 bg-neutral-900/50 border border-neutral-800/80 rounded-xl animate-scale-up space-y-4">
-                <div className="flex items-start justify-between">
+            {activeSection === 'analytics' ? (
+              <div className="p-6 space-y-6">
+                {/* Summary KPI Strip */}
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                  <div className="p-4 rounded-lg border border-[#E1E4E8] bg-white">
+                    <div className="flex items-center justify-between text-xs text-[#525B66]">
+                      <span>Unique Visitors</span>
+                      <Users className="w-4 h-4 text-[#387500]" />
+                    </div>
+                    <div className="font-mono text-2xl font-bold text-[#111417] tabular-nums mt-1">
+                      {uniqueVisitors.length}
+                    </div>
+                  </div>
+                  <div className="p-4 rounded-lg border border-[#E1E4E8] bg-white">
+                    <div className="flex items-center justify-between text-xs text-[#525B66]">
+                      <span>Catalog Downloads</span>
+                      <Download className="w-4 h-4 text-[#387500]" />
+                    </div>
+                    <div className="font-mono text-2xl font-bold text-[#111417] tabular-nums mt-1">
+                      {totalDownloads}
+                    </div>
+                  </div>
+                  <div className="p-4 rounded-lg border border-[#E1E4E8] bg-white">
+                    <div className="flex items-center justify-between text-xs text-[#525B66]">
+                      <span>Meetings Booked</span>
+                      <Calendar className="w-4 h-4 text-[#387500]" />
+                    </div>
+                    <div className="font-mono text-2xl font-bold text-[#111417] tabular-nums mt-1">
+                      {totalMeetings}
+                    </div>
+                  </div>
+                  <div className="p-4 rounded-lg border border-[#E1E4E8] bg-white">
+                    <div className="flex items-center justify-between text-xs text-[#525B66]">
+                      <span>Bulk Quotes</span>
+                      <BarChart3 className="w-4 h-4 text-[#387500]" />
+                    </div>
+                    <div className="font-mono text-2xl font-bold text-[#111417] tabular-nums mt-1">
+                      {totalQuotes}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Visitor Frequency & Selected Options Matrix */}
+                <div className="border border-[#E1E4E8] rounded-lg overflow-hidden">
+                  <div className="px-4 py-3 bg-[#F8F9FA] border-b border-[#E1E4E8] flex items-center justify-between">
+                    <h3 className="text-xs font-semibold text-[#111417]">
+                      Visitor Repeat Counts &amp; Selected Options
+                    </h3>
+                    <span className="text-xs text-[#525B66] font-mono tabular-nums">
+                      {uniqueVisitors.length} tracked profiles
+                    </span>
+                  </div>
+                  <div className="overflow-x-auto max-h-56 overflow-y-auto">
+                    <table className="w-full text-left text-xs border-collapse">
+                      <thead className="bg-white border-b border-[#E1E4E8] text-[#525B66]">
+                        <tr>
+                          <th className="py-2.5 px-4 font-medium">Visitor ID</th>
+                          <th className="py-2.5 px-4 font-medium">Visits</th>
+                          <th className="py-2.5 px-4 font-medium">Location / IP</th>
+                          <th className="py-2.5 px-4 font-medium">Lang</th>
+                          <th className="py-2.5 px-4 font-medium">Options Selected</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-[#E1E4E8]">
+                        {uniqueVisitors.length === 0 ? (
+                          <tr>
+                            <td colSpan={5} className="py-6 text-center text-[#525B66]">
+                              No visitor activity recorded yet.
+                            </td>
+                          </tr>
+                        ) : (
+                          uniqueVisitors.map((v) => (
+                            <tr key={v.visitorId} className="hover:bg-[#F8F9FA]">
+                              <td className="py-2.5 px-4 font-mono font-semibold text-[#111417]">
+                                {v.visitorId}
+                              </td>
+                              <td className="py-2.5 px-4 font-mono tabular-nums font-bold text-[#387500]">
+                                {v.maxVisitCount}x
+                              </td>
+                              <td className="py-2.5 px-4 text-[#525B66]">
+                                {v.location} {v.ip ? `(${v.ip})` : ''}
+                              </td>
+                              <td className="py-2.5 px-4 font-mono">{v.lastLanguage}</td>
+                              <td className="py-2.5 px-4 text-[#111417]">
+                                {Array.from(v.options).join(' · ') || 'Browsing'}
+                              </td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                {/* Controls & Live Event Feed */}
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setDataSource('local')}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-semibold cursor-pointer ${
+                        dataSource === 'local'
+                          ? 'bg-[#111417] text-white'
+                          : 'border border-[#E1E4E8] text-[#525B66]'
+                      }`}
+                    >
+                      Session Feed
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setDataSource('sheets')}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 cursor-pointer ${
+                        dataSource === 'sheets'
+                          ? 'bg-[#111417] text-white'
+                          : 'border border-[#E1E4E8] text-[#525B66]'
+                      }`}
+                    >
+                      <Database className="w-3.5 h-3.5" />
+                      <span>Google Sheet Live</span>
+                    </button>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <div className="relative">
+                      <Search className="w-3.5 h-3.5 text-[#525B66] absolute left-3 top-1/2 -translate-y-1/2" />
+                      <input
+                        type="text"
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                        placeholder="Search logs..."
+                        className="pl-8 pr-3 py-1.5 rounded-lg border border-[#E1E4E8] text-xs focus:outline-none focus:border-[#4D9E00]"
+                      />
+                    </div>
+                    <select
+                      value={filterType}
+                      onChange={(e) => setFilterType(e.target.value)}
+                      className="px-2.5 py-1.5 rounded-lg border border-[#E1E4E8] text-xs bg-white"
+                    >
+                      <option value="ALL">All Events</option>
+                      <option value="PAGE_VIEW">Page Views</option>
+                      <option value="LANGUAGE_CHANGE">Language Switches</option>
+                      <option value="PRODUCT_VIEW">Product Views</option>
+                      <option value="CATALOG_DOWNLOAD">Catalog Downloads</option>
+                      <option value="MEETING_BOOKING">Meetings Booked</option>
+                      <option value="BULK_QUOTE_SUBMIT">Bulk Quotes</option>
+                    </select>
+                    <button
+                      type="button"
+                      onClick={() => loadLogs()}
+                      className="p-1.5 rounded-lg border border-[#E1E4E8] hover:bg-[#F1F3F6] cursor-pointer"
+                      title="Refresh"
+                    >
+                      <RefreshCw className={`w-4 h-4 ${isRefreshing ? 'animate-spin' : ''}`} />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        clearLocalLogs();
+                        loadLogs('local');
+                      }}
+                      className="p-1.5 rounded-lg border border-[#E1E4E8] text-red-600 hover:bg-red-50 cursor-pointer"
+                      title="Clear local logs"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+
+                {errorMessage && (
+                  <div className="p-3 rounded-lg bg-lime-50 border border-lime-200 text-lime-900 text-xs">
+                    {errorMessage}
+                  </div>
+                )}
+
+                <div className="border border-[#E1E4E8] rounded-lg overflow-hidden max-h-64 overflow-y-auto divide-y divide-[#E1E4E8]">
+                  {filteredLogs.length === 0 ? (
+                    <div className="p-8 text-center text-xs text-[#525B66]">
+                      No matching telemetry records found.
+                    </div>
+                  ) : (
+                    filteredLogs.slice(0, 60).map((log: any, idx) => (
+                      <div
+                        key={idx}
+                        className="p-3.5 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2 hover:bg-[#F8F9FA]"
+                      >
+                        <div>
+                          <div className="flex flex-wrap items-center gap-2 text-[#525B66]">
+                            <span className="font-mono text-[11px]">
+                              {log.timestamp || log.Timestamp}
+                            </span>
+                            <span aria-hidden="true">·</span>
+                            <span className="font-mono font-semibold text-[#111417]">
+                              {log.eventType || log['Event Type']}
+                            </span>
+                            <span aria-hidden="true">·</span>
+                            <span className="font-mono text-[#387500]">
+                              {log.visitorId || log['Visitor ID']} (Visit #
+                              {log.visitCount || log['Visit Count'] || 1})
+                            </span>
+                          </div>
+                          <div className="font-medium text-[#111417] mt-1">
+                            {log.eventDetail || log['Event Detail']}
+                          </div>
+                          {(log.clientName && log.clientName !== 'N/A') ||
+                          (log['Client Name'] && log['Client Name'] !== 'N/A') ? (
+                            <div className="text-[#525B66] mt-0.5">
+                              {log.clientName || log['Client Name']} ·{' '}
+                              {log.companyName || log.Company || ''} ·{' '}
+                              {log.country || log.Country || ''} ·{' '}
+                              {log.clientPhone || log['Contact Mobile'] || ''}
+                            </div>
+                          ) : null}
+                        </div>
+                        <div className="text-right font-mono text-[11px] text-[#525B66] shrink-0">
+                          <div>{log.language || log.Language || 'EN'}</div>
+                          <div>{log.visitorLocation || log.Location || 'Global'}</div>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            ) : (
+              /* CMS & Logo Setup Tab */
+              <div className="p-6 space-y-6">
+                {/* Connected Endpoint Info */}
+                <div className="p-5 rounded-lg border border-[#E1E4E8] bg-[#F8F9FA] space-y-3">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                    <div>
+                      <h3 className="font-display text-sm font-bold text-[#111417]">
+                        Connected Google Apps Script Endpoint
+                      </h3>
+                      <p className="text-xs text-[#525B66] mt-0.5">
+                        Currently synced to the spreadsheet bound to this Apps Script deployment URL:
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex flex-col sm:flex-row gap-2">
+                    <input
+                      type="url"
+                      value={endpointInput}
+                      onChange={(e) => setEndpointInput(e.target.value)}
+                      placeholder={APPS_SCRIPT_URL}
+                      className="flex-1 rounded-lg border border-[#E1E4E8] bg-white px-3.5 py-2 text-xs font-mono text-[#111417] focus:outline-none focus:border-[#4D9E00]"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleSaveEndpoint}
+                      className="px-4 py-2 rounded-lg bg-[#111417] text-white text-xs font-semibold hover:bg-[#1C2024] cursor-pointer whitespace-nowrap"
+                    >
+                      Save &amp; Sync URL
+                    </button>
+                  </div>
+                </div>
+
+                {/* Brand Logo URL Preview / Sheet Test */}
+                <div className="p-5 rounded-lg border border-[#E1E4E8] bg-white space-y-3">
                   <div>
-                    <h4 className="font-outfit text-white text-sm font-semibold tracking-wide uppercase text-gold-400">
-                      Syncing Google Sheets directly to this Admin Feed
-                    </h4>
-                    <p className="text-xs text-gray-400 mt-1">
-                      Currently, Formsubmit.co accepts submissions beautifully. If you want this live website dashboard to also read and pull all active rows from Google Sheets, upgrade your standard Google Apps Script macro with the script below:
+                    <h3 className="font-display text-sm font-bold text-[#111417]">
+                      ZAYNOVA Brand Logo (Sheet Synced or Instant Preview)
+                    </h3>
+                    <p className="text-xs text-[#525B66] mt-0.5">
+                      Add a row in your Google Sheet <code className="font-mono bg-[#F1F3F6] px-1 py-0.5 rounded">BrandSettings</code> tab with <code className="font-mono bg-[#F1F3F6] px-1 py-0.5 rounded">key = logoUrl</code> and <code className="font-mono bg-[#F1F3F6] px-1 py-0.5 rounded">value = your image or Google Drive share URL</code>.
                     </p>
                   </div>
-                  <button 
-                    onClick={() => setShowAppsScriptGuide(false)}
-                    className="text-gray-500 hover:text-white text-xs uppercase"
-                  >
-                    Hide [x]
-                  </button>
+                  <div className="flex flex-col sm:flex-row gap-2">
+                    <input
+                      type="url"
+                      value={logoInput}
+                      onChange={(e) => setLogoInput(e.target.value)}
+                      placeholder="https://drive.google.com/file/d/... or direct PNG/SVG logo URL"
+                      className="flex-1 rounded-lg border border-[#E1E4E8] bg-white px-3.5 py-2 text-xs text-[#111417] focus:outline-none focus:border-[#4D9E00]"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleSaveLogoPreview}
+                      className="px-4 py-2 rounded-lg bg-[#65C800] hover:bg-[#7BE300] text-[#111417] text-xs font-bold cursor-pointer whitespace-nowrap"
+                    >
+                      Apply Logo
+                    </button>
+                  </div>
+                  {cmsSavedMsg && (
+                    <div className="text-xs text-emerald-700 font-medium">{cmsSavedMsg}</div>
+                  )}
                 </div>
 
-                {/* Steps instructions */}
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-[11px] text-gray-400">
-                  <div className="p-3 bg-neutral-950 border border-neutral-900 rounded-lg">
-                    <span className="font-mono text-gold-400 font-semibold text-xs block mb-1">STEP 1</span>
-                    Open your Google Sheet, click on <span className="text-white">Extensions</span> → <span className="text-white">Apps Script</span>. Remove previous codes.
+                {/* CSV Template Download & Live Resync */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="p-5 rounded-lg border border-[#E1E4E8] bg-white space-y-3">
+                    <div className="flex items-center gap-2 font-display text-sm font-bold text-[#111417]">
+                      <FileSpreadsheet className="w-4 h-4 text-[#387500]" />
+                      <span>1. Download Products CSV Template</span>
+                    </div>
+                    <p className="text-xs text-[#525B66] leading-relaxed">
+                      Import into a sheet tab named <strong className="text-[#111417]">Products</strong>. Supports <code className="font-mono">imageUrl</code>, <code className="font-mono">explodedImageUrl</code>, <code className="font-mono">parts</code>, and Google Drive share links.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => downloadProductsCsvTemplate(products)}
+                      className="px-4 py-2 rounded-lg border border-[#111417] text-[#111417] hover:bg-[#111417] hover:text-white text-xs font-semibold transition-colors inline-flex items-center gap-2 cursor-pointer"
+                    >
+                      <Download className="w-3.5 h-3.5" />
+                      <span>Download Products Template (.CSV)</span>
+                    </button>
                   </div>
-                  <div className="p-3 bg-neutral-950 border border-neutral-900 rounded-lg">
-                    <span className="font-mono text-gold-400 font-semibold text-xs block mb-1">STEP 2</span>
-                    Paste the script below. It works both ways: writes leads on POST and fetches logged rows instantly on GET.
-                  </div>
-                  <div className="p-3 bg-neutral-950 border border-neutral-900 rounded-lg">
-                    <span className="font-mono text-gold-400 font-semibold text-xs block mb-1">STEP 3</span>
-                    Click <span className="text-white">Deploy → New Deployment</span>. Select <span className="text-white">Web App</span>, Execute as "Me", Access: "Anyone". Authorize Google and replace macro url.
+
+                  <div className="p-5 rounded-lg border border-[#E1E4E8] bg-white space-y-3">
+                    <div className="flex items-center gap-2 font-display text-sm font-bold text-[#111417]">
+                      <Globe className="w-4 h-4 text-[#387500]" />
+                      <span>2. Resync Live Spreadsheet Data</span>
+                    </div>
+                    <p className="text-xs text-[#525B66] leading-relaxed">
+                      Tabs supported: <code className="font-mono">Products</code>,{' '}
+                      <code className="font-mono">Catalogs</code>,{' '}
+                      <code className="font-mono">BrandSettings</code>, and{' '}
+                      <code className="font-mono">AnalyticsLogs</code>.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={onRefreshSiteData}
+                      className="px-4 py-2 rounded-lg bg-[#111417] hover:bg-[#1C2024] text-white text-xs font-semibold transition-colors inline-flex items-center gap-2 cursor-pointer"
+                    >
+                      <RefreshCw className="w-3.5 h-3.5 text-[#7BE300]" />
+                      <span>Force Resync From Google Sheet</span>
+                    </button>
                   </div>
                 </div>
 
-                {/* Script Code blocks */}
-                <div className="relative">
-                  <div className="absolute top-3 right-3 flex items-center gap-2">
-                    <button 
-                      onClick={copyScriptToClipboard}
-                      className="px-3 py-1.5 bg-neutral-800 hover:bg-neutral-700 text-white rounded text-[10px] font-semibold tracking-wide flex items-center gap-1 cursor-pointer transition-all"
+                {/* All-in-One Apps Script Copy Box */}
+                <div className="p-5 rounded-lg border border-[#E1E4E8] bg-white space-y-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <h4 className="font-display text-sm font-bold text-[#121518]">
+                        3. All-in-One Google Apps Script (Two-Way Sync)
+                      </h4>
+                      <p className="text-xs text-[#525B66]">
+                        In your Google Sheet open Extensions → Apps Script, paste this code, and Deploy → New Deployment → Web App (Access: Anyone).
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleCopyScript}
+                      className="px-3.5 py-2 rounded-lg bg-[#121518] text-white text-xs font-semibold flex items-center gap-1.5 cursor-pointer shrink-0"
                     >
                       {copiedScript ? (
                         <>
-                          <Check className="w-3 h-3 text-emerald-400" /> Passed to Clipboard
+                          <Check className="w-3.5 h-3.5 text-emerald-400" />
+                          <span>Copied</span>
                         </>
                       ) : (
                         <>
-                          <Copy className="w-3 h-3" /> Copy Full Script
+                          <Copy className="w-3.5 h-3.5" />
+                          <span>Copy Apps Script</span>
                         </>
                       )}
                     </button>
                   </div>
-                  <pre className="p-4 bg-neutral-950 border border-neutral-900 rounded-xl text-[10px] font-mono text-gray-300 overflow-x-auto max-h-[220px] select-all">
-                    {upgradedAppsScriptCode}
+                  <pre className="p-4 rounded-lg bg-[#121518] text-gray-200 font-mono text-[11px] overflow-x-auto max-h-64 select-all">
+                    {ALL_IN_ONE_APPS_SCRIPT}
                   </pre>
                 </div>
               </div>
             )}
-
-            {errorMessage && (
-              <div className="mx-6 mt-6 p-3 bg-amber-950/20 border border-amber-900/50 text-amber-300 rounded-xl text-xs font-medium">
-                ⚠️ {errorMessage}
-              </div>
-            )}
-
-            {/* EVENT STREAM STREAM MODULE AREA */}
-            <div className="flex-1 p-6 flex flex-col min-h-0">
-              
-              {/* SEARCH AND FILTERS */}
-              <div className="flex flex-col sm:flex-row gap-3 mb-4 items-stretch justify-between">
-                
-                {/* Search query box */}
-                <div className="relative flex-1 max-w-md">
-                  <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-500 w-4 h-4" />
-                  <input 
-                    type="text"
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    placeholder="Search logs by Client Name, Phone, ISP, Location..."
-                    className="w-full bg-neutral-900/60 border border-neutral-800 focus:border-gold-500 rounded-xl py-2 pl-10 pr-4 text-white text-xs outline-none transition-all"
-                  />
-                  {searchQuery && (
-                    <button 
-                      onClick={() => setSearchQuery('')}
-                      className="absolute right-3.5 top-1/2 -translate-y-1/2 text-gray-500 hover:text-white text-xs"
-                    >
-                      Clear
-                    </button>
-                  )}
-                </div>
-
-                {/* Event type filters pills */}
-                <div className="flex items-center gap-1.5 overflow-x-auto py-1">
-                  <button 
-                    onClick={() => setFilterType('ALL')}
-                    className={`px-3 py-1.5 rounded-lg text-[10px] font-bold tracking-wider uppercase transition-colors shrink-0 cursor-pointer ${
-                      filterType === 'ALL' 
-                        ? 'bg-neutral-800 text-white' 
-                        : 'bg-neutral-900 hover:bg-neutral-800 text-gray-400 hover:text-white'
-                    }`}
-                  >
-                    All Streams ({filteredLogs.length})
-                  </button>
-                  <button 
-                    onClick={() => setFilterType('FORM_SUBMISSION')}
-                    className={`px-3 py-1.5 rounded-lg text-[10px] font-bold tracking-wider uppercase transition-colors shrink-0 cursor-pointer ${
-                      filterType === 'FORM_SUBMISSION' 
-                        ? 'bg-gold-550/25 text-gold-300 border border-gold-500/30' 
-                        : 'bg-neutral-900 hover:bg-neutral-800 text-gray-400 hover:text-white'
-                    }`}
-                  >
-                    Leads/Forms ({logs.filter(l => l.eventType === 'FORM_SUBMISSION').length})
-                  </button>
-                  <button 
-                    onClick={() => setFilterType('BUTTON_CLICK')}
-                    className={`px-3 py-1.5 rounded-lg text-[10px] font-bold tracking-wider uppercase transition-colors shrink-0 cursor-pointer ${
-                      filterType === 'BUTTON_CLICK' 
-                        ? 'bg-blue-950/30 text-blue-300 border border-blue-800/30' 
-                        : 'bg-neutral-900 hover:bg-neutral-800 text-gray-400 hover:text-white'
-                    }`}
-                  >
-                    Engagements ({logs.filter(l => l.eventType === 'BUTTON_CLICK').length})
-                  </button>
-                  <button 
-                    onClick={() => setFilterType('PAGE_VIEW')}
-                    className={`px-3 py-1.5 rounded-lg text-[10px] font-bold tracking-wider uppercase transition-colors shrink-0 cursor-pointer ${
-                      filterType === 'PAGE_VIEW' 
-                        ? 'bg-neutral-850 text-emerald-300 border border-neutral-800' 
-                        : 'bg-neutral-900 hover:bg-neutral-800 text-gray-400 hover:text-white'
-                    }`}
-                  >
-                    Traffic/Visits ({logs.filter(l => l.eventType === 'PAGE_VIEW').length})
-                  </button>
-                </div>
-              </div>
-
-              {/* STREAM LOG FEED TABLE */}
-              <div className="flex-1 overflow-x-auto min-h-0 bg-neutral-900/20 border border-neutral-900/60 rounded-xl overflow-y-auto">
-                {filteredLogs.length === 0 ? (
-                  <div className="p-12 text-center text-xs text-gray-500 flex flex-col items-center justify-center space-y-2">
-                    <ShieldAlert className="w-8 h-8 text-neutral-800" />
-                    <p className="font-outfit uppercase tracking-wider text-gray-400">No matching analytics records detected</p>
-                    <p className="text-[10px] text-gray-600 max-w-md antialiased">
-                      {searchQuery 
-                        ? `Change search parameters or clear the query "${searchQuery}" to view complete list.` 
-                        : 'Create a new Page View, click some Call/WhatsApp buttons, or submit a mock free site-visit/quotation in the client app to trigger live trackers!'
-                      }
-                    </p>
-                  </div>
-                ) : (
-                  <div className="divide-y divide-neutral-900">
-                    {filteredLogs.map((log, idx) => {
-                      // Styling badge according to Event Type
-                      let typeColor = "text-emerald-400 bg-neutral-905 border-neutral-800";
-                      let typeLabel = "TRAFFIC VISIT";
-                      
-                      if (log.eventType === 'FORM_SUBMISSION') {
-                        typeColor = "text-gold-400 bg-gold-950/20 border-gold-900/[0.15]";
-                        typeLabel = "LEAD SIGNUP";
-                      } else if (log.eventType === 'BUTTON_CLICK') {
-                        typeColor = "text-sky-400 bg-sky-950/15 border-sky-900/[0.15]";
-                        typeLabel = "HOTLINK CLICK";
-                      }
-
-                      const hasClientData = log.clientName && log.clientName !== 'N/A';
-
-                      return (
-                        <div key={idx} className="p-4 hover:bg-neutral-900/30 transition-all flex flex-col md:flex-row gap-4 justify-between items-start text-xs font-mono">
-                          
-                          {/* Stream Left: timestamp/badge & basic event details */}
-                          <div className="space-y-1.5 max-w-xl">
-                            <div className="flex flex-wrap items-center gap-2">
-                              <span className="text-[10px] text-gray-500 font-sans tracking-tight">{log.timestamp}</span>
-                              <span className={`px-2 py-0.5 rounded text-[8px] font-semibold border ${typeColor} tracking-widest`}>
-                                {typeLabel}
-                              </span>
-                              {log.inquiryNum && log.inquiryNum !== 'N/A' && (
-                                <span className="px-1.5 py-0.5 rounded text-[8px] font-bold bg-neutral-800 text-white">Inquiry {log.inquiryNum}</span>
-                              )}
-                            </div>
-                            
-                            <h5 className="text-white text-xs font-sans tracking-wide leading-relaxed font-semibold">
-                              {log.eventDetail}
-                            </h5>
-
-                            {/* Client particulars highlighted if form submission */}
-                            {hasClientData && (
-                              <div className="bg-neutral-950/60 border border-neutral-900 p-3 rounded-lg grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1.5 mt-2 font-sans font-normal text-xs text-gray-300">
-                                <div>
-                                  <span className="text-[9px] text-gray-500 block uppercase tracking-wider">Client Full Name</span>
-                                  <span className="text-white text-xs font-medium">{log.clientName}</span>
-                                </div>
-                                <div className="flex flex-col">
-                                  <span className="text-[9px] text-gray-500 block uppercase tracking-wider">Contact Mobile</span>
-                                  <a href={`tel:${log.clientPhone}`} className="text-emerald-400 hover:underline inline-flex items-center gap-1 text-xs font-semibold">
-                                    <Smartphone className="w-3 h-3" /> {log.clientPhone}
-                                  </a>
-                                </div>
-                                {log.clientEmail && log.clientEmail !== 'N/A' && (
-                                  <div className="mt-1">
-                                    <span className="text-[9px] text-gray-500 block uppercase tracking-wider">Email Address</span>
-                                    <a href={`mailto:${log.clientEmail}`} className="text-gray-400 hover:underline inline-flex items-center gap-1 text-xs">
-                                      <Mail className="w-3 h-3" /> {log.clientEmail}
-                                    </a>
-                                  </div>
-                                )}
-                                {log.projectType && log.projectType !== 'N/A' && (
-                                  <div className="mt-1">
-                                    <span className="text-[9px] text-gray-500 block uppercase tracking-wider">Requested Stream</span>
-                                    <span className="text-neutral-200">{log.projectType}</span>
-                                  </div>
-                                )}
-                                {log.areaSizeSqFt && log.areaSizeSqFt !== 'N/A' && (
-                                  <div className="mt-1">
-                                    <span className="text-[9px] text-gray-500 block uppercase tracking-wider">Estimated Area</span>
-                                    <span className="text-neutral-200 font-semibold">{log.areaSizeSqFt}</span>
-                                  </div>
-                                )}
-                                {log.calculatedBudget && log.calculatedBudget !== 'N/A' && (
-                                  <div className="mt-1">
-                                    <span className="text-[9px] text-gray-500 block uppercase tracking-wider font-semibold text-gold-400">Luxury Budget</span>
-                                    <span className="text-gold-300 font-bold">{log.calculatedBudget} ({log.qualityGrade})</span>
-                                  </div>
-                                )}
-                                {log.message && log.message !== 'N/A' && (
-                                  <div className="col-span-1 sm:col-span-2 mt-2 pt-1.5 border-t border-neutral-900/60">
-                                    <span className="text-[9px] text-gray-500 block uppercase tracking-wider">Bespoke Requirements Message</span>
-                                    <p className="text-gray-400 font-normal mt-0.5 leading-relaxed text-[11px] italic bg-neutral-900/30 p-2 rounded border border-neutral-855">
-                                      "{log.message}"
-                                    </p>
-                                  </div>
-                                )}
-                              </div>
-                            )}
-
-                          </div>
-
-                          {/* Stream Right: IP address & metadata info */}
-                          <div className="text-right text-[10px] text-gray-550 space-y-1 self-stretch md:self-auto flex flex-row md:flex-col justify-between md:justify-start items-center md:items-end border-t md:border-t-0 border-neutral-905 pt-2 md:pt-0">
-                            <div>
-                              <span className="text-white font-mono bg-neutral-900/70 py-0.5 px-1.5 rounded">{log.visitorIp || "N/A"}</span>
-                            </div>
-                            <div className="text-gray-400 font-sans mt-1">
-                              📍 {log.visitorLocation || "India"}
-                            </div>
-                            <div className="text-gray-650 font-sans text-[9px] mt-0.5 truncate max-w-[150px]">
-                              {log.visitorIsp || "System Core Access"}
-                            </div>
-                            <div className="mt-2 shrink-0">
-                              <button 
-                                onClick={() => handleDeleteIndividualLog(log)}
-                                className="p-1 px-1.5 bg-neutral-950 hover:bg-red-950/20 border border-neutral-900 hover:border-red-900/50 rounded-lg text-gray-500 hover:text-red-400 transition-all flex items-center justify-center gap-1 cursor-pointer font-sans text-[9px]"
-                                title="Remove this log entry from view"
-                              >
-                                <Trash2 className="w-3 h-3 text-red-500/80" /> Clear Row
-                              </button>
-                            </div>
-                          </div>
-
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* Admin Instructions Footer */}
-            <div className="p-4 bg-neutral-950 border-t border-neutral-900 text-center text-[10px] text-gray-500 flex flex-wrap gap-x-6 gap-y-2 justify-center">
-              <span>Google Sheet URL: <a href="https://docs.google.com/spreadsheets/d/1YH11X8rEHoBXT0SsmeCMTC2hZE6aji-IrEe9V-9V7VM/edit?usp=sharing" target="_blank" rel="noreferrer" className="text-gold-500 underline hover:text-white inline-flex items-center gap-0.5">1YH11X8rEHoBXT0Ssme... <ExternalLink className="w-2.5 h-2.5" /></a></span>
-              <span>Spreadsheet Synced Macro: <span className="text-emerald-400 font-mono">Formsubmit Ajax Relay</span></span>
-              <span>Authorization state: <span className="text-emerald-400 font-semibold flex inline-flex items-center gap-0.5"><CheckCircle2 className="w-2.5 h-2.5" /> Activated</span></span>
-            </div>
-
           </div>
         )}
-
       </div>
     </div>
   );

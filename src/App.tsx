@@ -1,1982 +1,1737 @@
-import { useState, useEffect, FormEvent } from 'react';
-import { AnimatePresence } from 'motion/react';
-import { trackEvent } from './utils/analytics';
-import { 
-  Compass, Home, Briefcase, HardHat, ChefHat, Layers, Armchair, Grid, 
-  Paintbrush, Palette, SquareDot, Zap, Droplet, Sparkles, Maximize, 
-  Scissors, Key, Building, MapPin, FileText, Award, Cpu, CheckCircle, 
-  Feather, Phone, Mail, Send, Menu, X, ArrowRight, ChevronLeft, 
-  ChevronRight, Plus, Minus, Star, Check, MessageSquare
+import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
+import {
+  ArrowRight,
+  BookOpen,
+  Calendar,
+  Check,
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  Download,
+  FileText,
+  Globe,
+  HelpCircle,
+  Layers,
+  Menu,
+  Package,
+  Search,
+  Send,
+  ShieldCheck,
+  Wrench,
+  X,
 } from 'lucide-react';
-import { 
-  SERVICES, PROJECTS, TESTIMONIALS, PROCESS_STEPS, FAQS, 
-  WHY_CHOOSE_US_POINTS, TRUST_INDICATORS, STATS 
-} from './data';
-import BeforeAfterSlider from './components/BeforeAfterSlider';
-import LeadModal from './components/LeadModal';
-import Preloader from './components/Preloader';
+import BrandLogo from './components/BrandLogo';
+import ProductDetailModal, { getLocalizedProductField } from './components/ProductDetailModal';
+import BulkQuoteAndMeetingModal from './components/BulkQuoteAndMeetingModal';
+import ExplodedPartsViewer from './components/ExplodedPartsViewer';
 import AdminDashboard from './components/AdminDashboard';
+import {
+  ALL_SEGMENTS,
+  BRUSHCUTTER_PARTS,
+  CHAINSAW_PARTS,
+  DEFAULT_BRAND_CONFIG,
+  DEFAULT_CATALOGS,
+  DEFAULT_PRODUCTS,
+  EXPLODED_IMAGES,
+  GLOBAL_GLOBE_IMAGE,
+  HERO_SLIDES,
+  OHV_ENGINE_PUMP_PARTS,
+  POWERTOOL_GEARBOX_PARTS,
+  PUMP_TURBINE_PARTS,
+} from './data';
+import { TRANSLATIONS } from './i18n/translations';
+import { LanguageCode, ProductItem, ProductSegment, SiteDataBundle } from './types';
+import { notifyPartnerLead, trackEvent } from './utils/analytics';
+import { fetchSiteDataFromSheets } from './utils/sheetsSync';
+import { downloadAllInOnePdfCatalogue } from './utils/pdfCatalog';
 
-// Import local image assets for correct bundler path resolution
-import luxuryInteriorHero from './assets/images/luxury_interior_hero_1781267401231.jpg';
-import luxuryKitchen from './assets/images/luxury_kitchen_1781267417904.jpg';
-import luxuryOffice from './assets/images/luxury_office_1781267434698.jpg';
-
-// Premium high-res showcase photos for quick hero spotlight (eliminates scrolling frustration)
-export const SPOTLIGHT_IMAGES = [
-  {
-    id: 1,
-    title: 'Bespoke Custom Walk-In Closet Curation',
-    desc: 'Premium LED sensor illumination, sleek bronze-tinted glass sliding profile profiles, meticulously segmented boutique cabinetry, and customized accessory organizer systems.',
-    image: 'https://images.unsplash.com/photo-1616486338812-3dadae4b4ace?auto=format&fit=crop&q=80&w=800',
-    type: 'Luxury Custom Closet'
-  },
-  {
-    id: 2,
-    title: 'Aurelia Culinary Modular Kitchen Studio',
-    desc: 'Integrated modern modular kitchen workspace boasting polished Italian calacatta quartz benchtops, warm profile LED details, and soft-close ergonomic fittings.',
-    image: luxuryKitchen,
-    type: 'Modular Kitchen'
-  },
-  {
-    id: 3,
-    title: 'Verve Corporate Office Headquarters Lobby',
-    desc: 'Grand entrance foyer incorporating premium grooved walnut acoustic wood panel screens, contemporary architectural linear layout, and recessed floor-wash luminaires.',
-    image: luxuryOffice,
-    type: 'Commercial Executive Office'
-  },
-  {
-    id: 4,
-    title: 'Grand Opulent Master Residence Lounge',
-    desc: 'Architectural living room styled with bespoke gold-pinnacle metallic trim bands, warm recessed false ceiling detailings, and sophisticated luxury lounge furnishings.',
-    image: 'https://images.unsplash.com/photo-1600210492486-724fe5c67fb0?auto=format&fit=crop&q=80&w=800',
-    type: 'Luxury Living Room'
-  }
+const LANGUAGES: { code: LanguageCode; label: string }[] = [
+  { code: 'en', label: 'English' },
+  { code: 'es', label: 'Español' },
+  { code: 'pt', label: 'Português' },
+  { code: 'fr', label: 'Français' },
+  { code: 'ar', label: 'العربية' },
+  { code: 'de', label: 'Deutsch' },
 ];
 
-// Interactive Custom Premium Logo with Architectural & Civil Elements
-export function ZaynovaLogo({ className = "h-11 w-11", showText = true, textClass = "text-xl md:text-2xl" }) {
+type QuickGroupKey =
+  | 'all'
+  | 'gardenForestry'
+  | 'agroSolar'
+  | 'powerPumps'
+  | 'constructionWashing'
+  | 'toolsSpares';
+
+const QUICK_GROUP_MAP: Record<Exclude<QuickGroupKey, 'all'>, ProductSegment[]> = {
+  gardenForestry: ['Garden & Forestry', 'Hand & Garden Tools'],
+  agroSolar: [
+    'Agro-Industrial Machinery',
+    'Solar',
+    'Spraying & Crop Protection',
+    'Wood & Agro Processing',
+  ],
+  powerPumps: [
+    'Engines & Power Generation',
+    'Water Pumps & Fluid',
+    'Diesel Machines',
+    'Electric Machines',
+  ],
+  constructionWashing: [
+    'Construction Equipment',
+    'Pressure Washing & Cleaning',
+    'Air Compressors',
+    'Industrial Equipment',
+    'Special Machinery',
+  ],
+  toolsSpares: ['Power Tools', 'Hand & Garden Tools', 'Spare Parts & Aftermarket'],
+};
+
+type AssemblyTabKey =
+  | 'brushcutter'
+  | 'chainsaw'
+  | 'ohvEnginePump'
+  | 'pumpTurbine'
+  | 'powerToolGearbox';
+
+function ProductImageCard({ src, alt, sku }: { src: string; alt: string; sku: string }) {
+  const [failed, setFailed] = useState(false);
+
+  if (!src || failed) {
+    return (
+      <div className="w-full h-full flex flex-col items-center justify-center bg-[#F1F3F6] text-[#525B66] p-6 text-center">
+        <Wrench className="w-9 h-9 text-[#387500] mb-2" />
+        <span className="font-mono text-xs font-semibold text-[#111417]">{sku}</span>
+        <span className="text-xs mt-1 line-clamp-2">{alt}</span>
+      </div>
+    );
+  }
+
   return (
-    <div className="flex items-center gap-3">
-      <svg className={`${className}`} viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
-        <defs>
-          {/* Multi-stop luxury warm antique gold metallic gradient with realistic highlight/shadow bands */}
-          <linearGradient id="logo-premium-gold" x1="0%" y1="100%" x2="100%" y2="0%">
-            <stop offset="0%" stopColor="#704A15" />       {/* Deep shadow bronze */}
-            <stop offset="20%" stopColor="#B38A3E" />      {/* Warm medium gold */}
-            <stop offset="40%" stopColor="#F5E4BE" />      {/* Bright champagne metallic light */}
-            <stop offset="60%" stopColor="#C99F4A" />      {/* Polished luster gold */}
-            <stop offset="80%" stopColor="#875E20" />      {/* Rich dark brass shade */}
-            <stop offset="100%" stopColor="#D9B771" />     {/* Soft satin gold highlight */}
-          </linearGradient>
-          
-          {/* Dynamic golden-glow and specular edge reflection gradient */}
-          <linearGradient id="logo-gold-glow" x1="0%" y1="0%" x2="100%" y2="100%">
-            <stop offset="0%" stopColor="#FFFFFF" />       {/* Direct light specular highlight */}
-            <stop offset="35%" stopColor="#F7E6C1" />      {/* Soft warm champagne */}
-            <stop offset="70%" stopColor="#C5963B" />      {/* Golden core */}
-            <stop offset="100%" stopColor="#754E15" />     {/* Dark edge shadow */}
-          </linearGradient>
-
-          {/* Strong multi-layered drop shadow filter to create the embossed 3D pop off the dark background */}
-          <filter id="gold-shadow-filter" x="-20%" y="-20%" width="145%" height="145%">
-            <feDropShadow dx="1.8" dy="2.5" stdDeviation="1.5" floodColor="#000000" floodOpacity="0.95" />
-            <feDropShadow dx="-0.4" dy="-0.4" stdDeviation="0.4" floodColor="#FFFFFF" floodOpacity="0.08" />
-          </filter>
-        </defs>
-
-        {/* ZAYNOVA Premium Gold Logo Emblem - Exact Architectural Geometry from the Image */}
-        <g filter="url(#gold-shadow-filter)">
-          
-          {/* Main "Z" - Top Horizontal Bar with beautiful descending left curved serif hook */}
-          <path 
-            d="M 12.5 38 C 12.5 25 13.8 14 13.8 14 H 80 L 71 23 H 20.2 V 34 C 20.2 36 19.5 38 18 38 H 12.5 Z" 
-            fill="url(#logo-premium-gold)" 
-            stroke="url(#logo-gold-glow)"
-            strokeWidth="0.4"
-          />
-
-          {/* Main "Z" - Thick Central Slanted Diagonal Body */}
-          <path 
-            d="M 80 14 L 12 88 H 28.5 L 84.5 23 L 80 14 Z" 
-            fill="url(#logo-premium-gold)" 
-            stroke="url(#logo-gold-glow)"
-            strokeWidth="0.4"
-          />
-
-          {/* Main "Z" - Bottom Left Horizontal Bar & Ascent Serif */}
-          <path 
-            d="M 12 88 H 32 V 79.5 H 24.5 L 24.5 81.5 H 12 V 88 Z" 
-            fill="url(#logo-premium-gold)" 
-            stroke="url(#logo-gold-glow)"
-            strokeWidth="0.4"
-          />
-
-          {/* Thin Companion Accent Parallel Slash */}
-          <path 
-            d="M 84.5 14.5 L 34.5 76" 
-            stroke="url(#logo-gold-glow)" 
-            strokeWidth="1.9" 
-            strokeLinecap="round" 
-          />
-
-          {/* Gabled Architectural Roof (Thickened solid gold representation) */}
-          <path 
-            d="M 44 74.5 L 51 67.5 L 58 74.5" 
-            stroke="url(#logo-gold-glow)" 
-            strokeWidth="2.5" 
-            strokeLinecap="round" 
-            strokeLinejoin="round" 
-            fill="none" 
-          />
-
-          {/* Window pane (2x2 grid representing construction blocks with micro-bevel) */}
-          <g fill="url(#logo-premium-gold)">
-            <rect x="45.5" y="77" width="4.5" height="4.5" rx="0.5" stroke="url(#logo-gold-glow)" strokeWidth="0.3" />
-            <rect x="52" y="77" width="4.5" height="4.5" rx="0.5" stroke="url(#logo-gold-glow)" strokeWidth="0.3" />
-            <rect x="45.5" y="83.5" width="4.5" height="4.5" rx="0.5" stroke="url(#logo-gold-glow)" strokeWidth="0.3" />
-            <rect x="52" y="83.5" width="4.5" height="4.5" rx="0.5" stroke="url(#logo-gold-glow)" strokeWidth="0.3" />
-          </g>
-
-          {/* Civil Pillars / Skyscraper Block (Chiseled 3D design matching screenshot exactly) */}
-          <g stroke="url(#logo-gold-glow)" strokeWidth="0.25">
-            {/* Column 1 - Left Panel (High-Gloss Highlight) & Right Panel (Shadow Rich Gold) */}
-            <path d="M 60 88 V 48 L 62 46.25 V 88 Z" fill="url(#logo-gold-glow)" />
-            <path d="M 62 88 V 46.25 L 64 44.5 V 88 Z" fill="url(#logo-premium-gold)" />
-            {/* Column 2 - Tallest central skyscraper segment */}
-            <path d="M 67 88 V 38 L 69 36.25 V 88 Z" fill="url(#logo-gold-glow)" />
-            <path d="M 69 88 V 36.25 L 71 34.5 V 88 Z" fill="url(#logo-premium-gold)" />
-            {/* Column 3 - Step down segment */}
-            <path d="M 74 88 V 58 L 76 56.25 V 88 Z" fill="url(#logo-gold-glow)" />
-            <path d="M 76 88 V 56.25 L 78 54.5 V 88 Z" fill="url(#logo-premium-gold)" />
-            {/* Column 4 - Outer short segment */}
-            <path d="M 81 88 V 66 L 83 64.25 V 88 Z" fill="url(#logo-gold-glow)" />
-            <path d="M 83 88 V 64.25 L 85 62.5 V 88 Z" fill="url(#logo-premium-gold)" />
-          </g>
-
-          {/* Foundation support girder (Horizontal bottom anchor line) */}
-          <rect x="41" y="88.2" width="46" height="1.8" fill="url(#logo-premium-gold)" rx="0.5" />
-        </g>
-      </svg>
-      {showText && (
-        <div className="flex flex-col">
-          <span className={`font-display font-medium tracking-[0.34em] text-white ${textClass} leading-none`}>
-            ZAYNOVA
-          </span>
-          <span className="text-[9px] text-gold-400 font-outfit tracking-[0.2em] uppercase mt-1 leading-none">
-            Interior • Renovation • Civil
-          </span>
-        </div>
-      )}
-    </div>
+    <img
+      src={src}
+      alt={alt}
+      referrerPolicy="no-referrer"
+      onError={() => setFailed(true)}
+      className="w-full h-full object-cover group-hover:scale-[1.03] transition-transform duration-300"
+    />
   );
 }
 
-// Map Lucide icons dynamically from data definitions
-function ServiceIcon({ name, className = "w-6 h-6 text-gold-400" }: { name: string; className?: string }) {
-  const icons: Record<string, any> = {
-    Compass, Home, Briefcase, HardHat, ChefHat, Layers, Armchair, Grid, 
-    Paintbrush, Palette, SquareDot, Zap, Droplet, Sparkles, Maximize, 
-    Scissors, Key, Building, MapPin, FileText, Award, Cpu, CheckCircle, Feather
-  };
-  const IconComp = icons[name] || SquareDot;
-  return <IconComp className={className} />;
-}
+function CatalogCoverCard({ src, alt }: { src: string; alt: string }) {
+  const [failed, setFailed] = useState(false);
 
-export default function App() {
-  const [showPreloader, setShowPreloader] = useState(true);
-
-  // Auto-dismiss original preloader animation after 3.2s precisely
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      setShowPreloader(false);
-    }, 3200);
-    return () => clearTimeout(timer);
-  }, []);
-  const [navScrolled, setNavScrolled] = useState(false);
-  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState<'all' | 'interior' | 'renovation' | 'civil'>('all');
-  const [selectedPortfolioCategory, setSelectedPortfolioCategory] = useState<string>('all');
-  const [galleryFilter, setGalleryFilter] = useState<string>('All');
-  const [activeFAQId, setActiveFAQId] = useState<string | null>(null);
-  
-  // Testimonial state
-  const [currentTestimonial, setCurrentTestimonial] = useState(0);
-
-  // Modal interactions
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const [modalType, setModalType] = useState<'site-visit' | 'quotation'>('site-visit');
-  const [selectedService, setSelectedService] = useState('');
-  const [isAdminOpen, setIsAdminOpen] = useState(false);
-
-  // Contact form submission flow
-  const [contactName, setContactName] = useState('');
-  const [contactPhone, setContactPhone] = useState('');
-  const [contactEmail, setContactEmail] = useState('');
-  const [contactType, setContactType] = useState('Residential Interiors');
-  const [contactMsg, setContactMsg] = useState('');
-  const [contactSuccess, setContactSuccess] = useState(false);
-  const [contactSubmitting, setContactSubmitting] = useState(false);
-
-  // Lightbox state
-  const [lightboxImage, setLightboxImage] = useState<string | null>(null);
-
-  // Spotlight index state for elite showcase Carousel (at the top)
-  const [currentSpotlightIndex, setCurrentSpotlightIndex] = useState(0);
-  const [showFloatingDock, setShowFloatingDock] = useState(false);
-
-  // Scroll effect to upgrade Navigation bar style & toggle Glassmorphic Floating Dock
-  useEffect(() => {
-    const handleScroll = () => {
-      setNavScrolled(window.scrollY > 50);
-      setShowFloatingDock(window.scrollY > 300);
-    };
-    window.addEventListener('scroll', handleScroll);
-    return () => window.removeEventListener('scroll', handleScroll);
-  }, []);
-
-  // Automatic gentle rotation of Spotlight elements every 5.5s
-  useEffect(() => {
-    if (showPreloader) return;
-    const timer = setInterval(() => {
-      setCurrentSpotlightIndex((prev) => (prev + 1) % SPOTLIGHT_IMAGES.length);
-    }, 5500);
-    return () => clearInterval(timer);
-  }, [showPreloader]);
-
-  // Prevent page scrolling while preloader is visible
-  useEffect(() => {
-    if (showPreloader) {
-      document.body.style.overflow = 'hidden';
-    } else {
-      document.body.style.overflow = '';
-    }
-    return () => {
-      document.body.style.overflow = '';
-    };
-  }, [showPreloader]);
-
-  // Track page view event when user enters and the preloader hides
-  useEffect(() => {
-    if (!showPreloader) {
-      trackEvent({
-        eventType: 'PAGE_VIEW',
-        eventDetail: 'Visitor entered ZAYNOVA luxury interface'
-      });
-    }
-  }, [showPreloader]);
-
-  const openModal = (type: 'site-visit' | 'quotation', serviceTitle = '') => {
-    setModalType(type);
-    setSelectedService(serviceTitle);
-    setIsModalOpen(true);
-  };
-
-  const handleContactSubmit = async (e: FormEvent) => {
-    e.preventDefault();
-    if (!contactName || !contactPhone) return;
-    
-    setContactSubmitting(true);
-
-    try {
-      // Get next inquiry number dynamically from the same local counter
-      const current = localStorage.getItem('zaynova_inquiry_counter');
-      let count = 1;
-      if (current) {
-        const parsed = parseInt(current, 10);
-        if (!isNaN(parsed)) {
-          count = parsed;
-        }
-      }
-      const nextCount = count + 1;
-      localStorage.setItem('zaynova_inquiry_counter', nextCount.toString());
-      const inquiryNum = count.toString().padStart(3, '0');
-
-      const payload = {
-        _subject: `Zaynova Inquiry #${inquiryNum} | Contact: ${contactName} (${contactType})`,
-        _template: "box",
-        "INQUIRY NUMBER": `#${inquiryNum}`,
-        "CLIENT NAME": contactName,
-        "CONTACT MOBILE": contactPhone,
-        "EMAIL ADDRESS": contactEmail || 'N/A',
-        "PROJECT STREAM": contactType,
-        "DETAILS / REQUIREMENTS": contactMsg || 'No specific requirements message provided.',
-        "SUBMISSION TIMELINE": new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' }) + ' (IST)'
-      };
-
-      // Logging Contact Form submissions dynamically to Google Sheets
-      trackEvent({
-        eventType: 'FORM_SUBMISSION',
-        eventDetail: `Footer Contact/Inquiry Form (${contactType})`,
-        clientName: contactName,
-        clientPhone: contactPhone,
-        clientEmail: contactEmail || 'N/A',
-        projectType: contactType,
-        inquiryNum: inquiryNum,
-        message: contactMsg || 'No specific requirements message provided.'
-      });
-
-      const response = await fetch('https://formsubmit.co/ajax/45c305c0a323d36e4c27fbab7a90f7c4', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json'
-        },
-        body: JSON.stringify(payload)
-      });
-
-      if (!response.ok) {
-        console.error('Failed to submit contact form to email server.', response.statusText);
-      }
-    } catch (err) {
-      console.error('Contact form submission network error:', err);
-    } finally {
-      setContactSubmitting(false);
-      setContactSuccess(true);
-    }
-  };
-
-  const handleWAInquiry = () => {
-    trackEvent({
-      eventType: 'BUTTON_CLICK',
-      eventDetail: `Clicked 'WhatsApp Direct' in footer form: Name: ${contactName || 'N/A'}, Phone: ${contactPhone || 'N/A'}`
-    });
-    const message = `Hello ZAYNOVA! I'd like to get in touch. Name: ${contactName || 'Client'}, Mobile: ${contactPhone || 'N/A'}, Project Type: ${contactType}, Message: ${contactMsg || 'General Inquiry'}`;
-    window.open(`https://wa.me/918750083150?text=${encodeURIComponent(message)}`, '_blank');
-  };
-
-  const carouselNext = () => {
-    setCurrentTestimonial((prev) => (prev + 1) % TESTIMONIALS.length);
-  };
-
-  const carouselPrev = () => {
-    setCurrentTestimonial((prev) => (prev - 1 + TESTIMONIALS.length) % TESTIMONIALS.length);
-  };
-
-  // Filter 18 services based on tab
-  const filteredServices = SERVICES.filter(service => {
-    if (activeTab === 'all') return true;
-    return service.category === activeTab;
-  });
-
-  // Unique service categories listed under Projects
-  const portfolioCategories = ['all', 'Living Rooms', 'Bedrooms', 'Modular Kitchens', 'Bathrooms', 'Office Interiors', 'False Ceiling Projects', 'Civil Work Projects', 'Commercial Projects'];
-  const filteredProjects = selectedPortfolioCategory === 'all' 
-    ? PROJECTS 
-    : PROJECTS.filter(p => p.category === selectedPortfolioCategory);
-
-  // Gallery items matched with categorizations
-  const GALLERY_ITEMS = [
-    { id: 1, category: 'Interiors', tag: 'Living Room', image: 'https://images.unsplash.com/photo-1600210492486-724fe5c67fb0?auto=format&fit=crop&q=80&w=800' },
-    { id: 2, category: 'Renovation', tag: 'Kitchen', image: luxuryKitchen },
-    { id: 3, category: 'Commercial', tag: 'Office Lobby', image: luxuryOffice },
-    { id: 4, category: 'Civil Works', tag: 'Reinforcement', image: 'https://images.unsplash.com/photo-1504307651254-35680f356dfd?auto=format&fit=crop&q=80&w=800' },
-    { id: 5, category: 'Residential', tag: 'Master Bedroom', image: 'https://images.unsplash.com/photo-1616594039964-ae9021a400a0?auto=format&fit=crop&q=80&w=800' },
-    { id: 6, category: 'Interiors', tag: 'Luxury Dining', image: 'https://images.unsplash.com/photo-1613490493576-7fde63acd811?auto=format&fit=crop&q=80&w=800' },
-    { id: 7, category: 'Residential', tag: 'Custom Closet', image: 'https://images.unsplash.com/photo-1616486338812-3dadae4b4ace?auto=format&fit=crop&q=80&w=800' },
-    { id: 8, category: 'Renovation', tag: 'Spa Washroom', image: 'https://images.unsplash.com/photo-1552321554-5fefe8c9ef14?auto=format&fit=crop&q=80&w=800' },
-    { id: 9, category: 'Civil Works', tag: 'Ceiling Frame', image: 'https://images.unsplash.com/photo-1513694203232-719a280e022f?auto=format&fit=crop&q=80&w=800' }
-  ];
-
-  const filteredGallery = galleryFilter === 'All'
-    ? GALLERY_ITEMS
-    : GALLERY_ITEMS.filter(item => item.category.toLowerCase() === galleryFilter.toLowerCase() || (galleryFilter === 'Residential' && (item.category === 'Residential' || item.category === 'Interiors')));
+  if (!src || failed) {
+    return (
+      <div className="w-full h-full flex items-center justify-center bg-[#F1F3F6]">
+        <BookOpen className="w-10 h-10 text-[#387500]" />
+      </div>
+    );
+  }
 
   return (
-    <div className="bg-dark-mate text-gray-100 min-h-screen relative selection:bg-gold-500 selection:text-black antialiased font-sans">
-      
-      {/* Premium Company Branded Preloader on first load */}
-      <AnimatePresence>
-        {showPreloader && <Preloader />}
-      </AnimatePresence>
-      
-      {/* ---------------- NAVIGATION ---------------- */}
-      <header 
-        id="luxury-header"
-        className={`fixed top-0 left-0 w-full z-40 transition-all duration-500 ${
-          navScrolled 
-            ? 'py-4 bg-dark-charcoal/90 backdrop-blur-md border-b border-gold-800/20 shadow-xl' 
-            : 'py-6 bg-transparent border-b border-transparent'
-        }`}
-      >
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex justify-between items-center">
-          {/* Brand Logo */}
-          <a href="#home" id="nav-logo-link" className="cursor-pointer">
-            <ZaynovaLogo />
+    <img
+      src={src}
+      alt={alt}
+      referrerPolicy="no-referrer"
+      onError={() => setFailed(true)}
+      className="w-full h-full object-cover"
+    />
+  );
+}
+
+export function App() {
+  const [lang, setLang] = useState<LanguageCode>(() => {
+    const saved = localStorage.getItem('zaynova_lang') as LanguageCode | null;
+    return saved && TRANSLATIONS[saved] ? saved : 'en';
+  });
+
+  const t = TRANSLATIONS[lang];
+
+  const [siteData, setSiteData] = useState<SiteDataBundle>({
+    products: DEFAULT_PRODUCTS,
+    catalogs: DEFAULT_CATALOGS,
+    brandConfig: DEFAULT_BRAND_CONFIG,
+    source: 'default',
+  });
+
+  const [quickGroup, setQuickGroup] = useState<QuickGroupKey>('all');
+  const [selectedCategory, setSelectedCategory] = useState<'ALL' | ProductSegment>('ALL');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+
+  // Automatic Hero Slideshow & Globe Fallback
+  const [heroSlideIdx, setHeroSlideIdx] = useState(0);
+  const [heroCarouselPaused, setHeroCarouselPaused] = useState(false);
+  const [globeImgError, setGlobeImgError] = useState(false);
+
+  // Cinematic Exploded Assembly Showcase State
+  const [assemblyTab, setAssemblyTab] = useState<AssemblyTabKey>('brushcutter');
+
+  // Modals state
+  const [activeProduct, setActiveProduct] = useState<ProductItem | null>(null);
+  const [activeProductMode, setActiveProductMode] = useState<'studio' | 'exploded'>('studio');
+  const [matchedSubModelSku, setMatchedSubModelSku] = useState<string>('');
+  const [inquiryModalOpen, setInquiryModalOpen] = useState(false);
+  const [inquiryModalTab, setInquiryModalTab] = useState<'quote' | 'meeting'>('quote');
+  const [preselectedModel, setPreselectedModel] = useState('');
+  const [adminOpen, setAdminOpen] = useState(false);
+
+  // Unified PDF download, Importer FAQ & Direct Partnership Form state
+  const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
+  const [openFaqIdx, setOpenFaqIdx] = useState<number>(0);
+  const [inlineCompany, setInlineCompany] = useState('');
+  const [inlineName, setInlineName] = useState('');
+  const [inlineCountry, setInlineCountry] = useState('');
+  const [inlinePhone, setInlinePhone] = useState('');
+  const [inlineEmail, setInlineEmail] = useState('');
+  const [inlineRole, setInlineRole] = useState('National / Exclusive Importer');
+  const [inlineDivisions, setInlineDivisions] = useState(
+    'Brush Cutters, Chainsaws & Agro Tillers'
+  );
+  const [inlineNotes, setInlineNotes] = useState('');
+  const [inlineSubmitting, setInlineSubmitting] = useState(false);
+  const [inlineSubmitted, setInlineSubmitted] = useState(false);
+
+  const syncFromSheet = useCallback(async () => {
+    const bundle = await fetchSiteDataFromSheets();
+    setSiteData(bundle);
+  }, []);
+
+  useEffect(() => {
+    document.documentElement.lang = lang;
+    document.documentElement.dir = t.dir;
+    localStorage.setItem('zaynova_lang', lang);
+  }, [lang, t.dir]);
+
+  useEffect(() => {
+    syncFromSheet();
+    trackEvent({
+      eventType: 'PAGE_VIEW',
+      eventDetail: 'Visited ZAYNOVA Global Machinery & Distributor Portal',
+      language: lang,
+      optionTag: `Lang:${lang.toUpperCase()}`,
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (heroCarouselPaused || HERO_SLIDES.length <= 1) return;
+    const timer = window.setInterval(() => {
+      setHeroSlideIdx((prev) => (prev + 1) % HERO_SLIDES.length);
+    }, 4200);
+    return () => window.clearInterval(timer);
+  }, [heroCarouselPaused]);
+
+  const handleLanguageChange = (nextLang: LanguageCode) => {
+    setLang(nextLang);
+    trackEvent({
+      eventType: 'LANGUAGE_CHANGE',
+      eventDetail: `Switched Storefront Language to ${TRANSLATIONS[nextLang].nativeName}`,
+      language: nextLang,
+      optionTag: `Lang:${nextLang.toUpperCase()}`,
+    });
+  };
+
+  const handleQuickGroupSelect = (group: QuickGroupKey) => {
+    setQuickGroup(group);
+    setSelectedCategory('ALL');
+    trackEvent({
+      eventType: 'CATEGORY_SELECT',
+      eventDetail: `Filtered Quick Division: ${group}`,
+      language: lang,
+      optionTag: `Group:${group}`,
+    });
+  };
+
+  const handleCategorySelect = (cat: 'ALL' | ProductSegment) => {
+    setSelectedCategory(cat);
+    setQuickGroup('all');
+    trackEvent({
+      eventType: 'CATEGORY_SELECT',
+      eventDetail: `Filtered Machinery Division: ${cat}`,
+      language: lang,
+      optionTag: `Seg:${cat}`,
+    });
+  };
+
+  const handleInspectProduct = (
+    product: ProductItem,
+    mode: 'studio' | 'exploded' = 'studio'
+  ) => {
+    let subSku = '';
+    const q = searchQuery.trim().toLowerCase();
+    if (q && product.subModels && product.subModels.length > 0) {
+      const hit = product.subModels.find(
+        (m) =>
+          m.sku.toLowerCase().includes(q) ||
+          m.name.toLowerCase().includes(q) ||
+          m.application.toLowerCase().includes(q)
+      );
+      if (hit) subSku = hit.sku;
+    }
+
+    setMatchedSubModelSku(subSku);
+    setActiveProductMode(mode);
+    setActiveProduct(product);
+    trackEvent({
+      eventType: 'PRODUCT_VIEW',
+      eventDetail: `Opened ${mode === 'exploded' ? 'Exploded Parts' : 'Models'} for ${
+        product.sku
+      } (${product.name})`,
+      language: lang,
+      projectType: product.sku,
+      optionTag: `SKU:${product.sku}${mode === 'exploded' ? ':Parts' : ''}`,
+    });
+  };
+
+  const openQuoteModal = (tab: 'quote' | 'meeting', modelLabel = '') => {
+    setInquiryModalTab(tab);
+    setPreselectedModel(modelLabel);
+    setInquiryModalOpen(true);
+    trackEvent({
+      eventType: 'BUTTON_CLICK',
+      eventDetail: `Opened ${tab === 'meeting' ? 'Meeting Booking' : 'Dealer Query'} Modal${
+        modelLabel ? ` for ${modelLabel}` : ''
+      }`,
+      language: lang,
+      optionTag: tab === 'meeting' ? 'Intent:Meeting' : 'Intent:DealerQuery',
+    });
+  };
+
+  const handleDownloadMasterPdf = async () => {
+    if (isGeneratingPdf) return;
+    setIsGeneratingPdf(true);
+    try {
+      await downloadAllInOnePdfCatalogue(
+        siteData.products,
+        siteData.brandConfig,
+        lang,
+        t
+      );
+      trackEvent({
+        eventType: 'CATALOG_DOWNLOAD',
+        eventDetail: `Downloaded All-in-One PDF Catalogue (${TRANSLATIONS[lang].nativeName})`,
+        language: lang,
+        projectType: 'ALL_IN_ONE_PDF_2026',
+        optionTag: `PDF:${lang.toUpperCase()}`,
+      });
+    } finally {
+      setIsGeneratingPdf(false);
+    }
+  };
+
+  const handleInlinePartnerSubmit = async (e: FormEvent) => {
+    e.preventDefault();
+    if (
+      !inlineName.trim() ||
+      !inlineCountry.trim() ||
+      !inlinePhone.trim() ||
+      !inlineEmail.trim()
+    ) {
+      return;
+    }
+    setInlineSubmitting(true);
+    try {
+      const current =
+        parseInt(localStorage.getItem('zaynova_inquiry_counter') || '1', 10) || 1;
+      localStorage.setItem('zaynova_inquiry_counter', String(current + 1));
+      const inquiryNum = String(current).padStart(4, '0');
+
+      await Promise.all([
+        trackEvent({
+          eventType: 'BULK_QUOTE_SUBMIT',
+          eventDetail: `Importer/Distributor Form: ${inlineDivisions} (${inlineRole} - ${inlineCountry})`,
+          language: lang,
+          optionTag: `Partner:${inlineCountry}:${inlineRole}`,
+          clientName: inlineName.trim(),
+          companyName: inlineCompany.trim() || 'Independent Importer',
+          country: inlineCountry.trim(),
+          clientPhone: inlinePhone.trim(),
+          clientEmail: inlineEmail.trim(),
+          projectType: inlineDivisions.trim(),
+          orderVolume: inlineRole,
+          inquiryNum,
+          message:
+            inlineNotes.trim() ||
+            'Direct importer & distributor partnership request via portal.',
+        }),
+        notifyPartnerLead({
+          inquiryType: 'Importer & Distributor Partnership Application',
+          inquiryNum,
+          companyName: inlineCompany.trim() || 'Independent Importer',
+          contactName: inlineName.trim(),
+          country: inlineCountry.trim(),
+          phone: inlinePhone.trim(),
+          email: inlineEmail.trim(),
+          preferredDivisions: inlineDivisions.trim(),
+          partnershipRole: inlineRole,
+          language: lang,
+          notes:
+            inlineNotes.trim() ||
+            'Direct importer & distributor partnership request via portal.',
+        }),
+      ]);
+      setInlineSubmitted(true);
+    } finally {
+      setInlineSubmitting(false);
+    }
+  };
+
+  const filteredProducts = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    return siteData.products.filter((p) => {
+      const segmentMatch =
+        selectedCategory !== 'ALL'
+          ? p.category === selectedCategory
+          : quickGroup === 'all'
+          ? true
+          : QUICK_GROUP_MAP[quickGroup].includes(p.category);
+
+      if (!segmentMatch) return false;
+      if (!q) return true;
+
+      const localizedName = getLocalizedProductField(p, 'name', lang).toLowerCase();
+      const localizedDesc = getLocalizedProductField(p, 'description', lang).toLowerCase();
+      const highlightsText = (p.highlights || []).join(' ').toLowerCase();
+      const categoryText = (t.products.categories[p.category] || p.category).toLowerCase();
+      const subModelsText = (p.subModels || [])
+        .map((m) => `${m.sku} ${m.name} ${m.displacement} ${m.powerSpec} ${m.application}`)
+        .join(' ')
+        .toLowerCase();
+
+      return (
+        p.sku.toLowerCase().includes(q) ||
+        p.name.toLowerCase().includes(q) ||
+        localizedName.includes(q) ||
+        localizedDesc.includes(q) ||
+        p.displacement.toLowerCase().includes(q) ||
+        p.powerSpec.toLowerCase().includes(q) ||
+        highlightsText.includes(q) ||
+        categoryText.includes(q) ||
+        subModelsText.includes(q)
+      );
+    });
+  }, [siteData.products, selectedCategory, quickGroup, searchQuery, lang, t.products.categories]);
+
+  const activeAssemblyConfig = useMemo(() => {
+    if (assemblyTab === 'chainsaw') {
+      const matched =
+        siteData.products.find((p) => p.id === 'line-chainsaws' || p.sku.includes('CS')) ||
+        siteData.products.find((p) => p.category === 'Garden & Forestry');
+      return {
+        imageUrl: EXPLODED_IMAGES.chainsaw,
+        parts: CHAINSAW_PARTS,
+        title: matched
+          ? `${matched.sku} · ${getLocalizedProductField(matched, 'name', lang)}`
+          : 'ZYN-CS Series · Pro Timber Chainsaw Assembly',
+        product: matched || siteData.products[0],
+      };
+    }
+
+    if (assemblyTab === 'ohvEnginePump') {
+      const matched =
+        siteData.products.find((p) => p.id === 'line-power-pumps' || p.sku.includes('GP')) ||
+        siteData.products.find(
+          (p) =>
+            p.category === 'Agro-Industrial Machinery' ||
+            p.category === 'Engines & Power Generation' ||
+            p.category === 'Water Pumps & Fluid'
+        );
+      return {
+        imageUrl: matched?.explodedImageUrl || EXPLODED_IMAGES.ohvEnginePump,
+        parts:
+          matched?.parts && matched.parts.length > 0 ? matched.parts : OHV_ENGINE_PUMP_PARTS,
+        title: matched
+          ? `${matched.sku} · ${getLocalizedProductField(matched, 'name', lang)}`
+          : '4-Stroke OHV Engine, Alternator & Centrifugal Pump Cutaway',
+        product: matched || siteData.products[0],
+      };
+    }
+
+    if (assemblyTab === 'pumpTurbine') {
+      const matched =
+        siteData.products.find((p) => p.id === 'line-washing-air' || p.sku.includes('PW')) ||
+        siteData.products.find((p) => p.category === 'Pressure Washing & Cleaning');
+      return {
+        imageUrl: matched?.explodedImageUrl || EXPLODED_IMAGES.pumpTurbine,
+        parts: matched?.parts && matched.parts.length > 0 ? matched.parts : PUMP_TURBINE_PARTS,
+        title: matched
+          ? `${matched.sku} · ${getLocalizedProductField(matched, 'name', lang)}`
+          : 'ZYN-PW Series · Triplex Plunger Pump & Turbine Powertrain',
+        product: matched || siteData.products[0],
+      };
+    }
+
+    if (assemblyTab === 'powerToolGearbox') {
+      const matched =
+        siteData.products.find((p) => p.id === 'line-tools-spares' || p.sku.includes('OEM')) ||
+        siteData.products.find((p) => p.category === 'Power Tools');
+      return {
+        imageUrl: matched?.explodedImageUrl || EXPLODED_IMAGES.powerToolGearbox,
+        parts:
+          matched?.parts && matched.parts.length > 0
+            ? matched.parts
+            : POWERTOOL_GEARBOX_PARTS,
+        title: matched
+          ? `${matched.sku} · ${getLocalizedProductField(matched, 'name', lang)}`
+          : 'ZYN-OEM Series · Brushless Motor & Planetary Steel Gearbox',
+        product: matched || siteData.products[0],
+      };
+    }
+
+    const matched =
+      siteData.products.find((p) => p.id === 'line-brushcutters' || p.sku.includes('BC')) ||
+      siteData.products.find((p) => p.category === 'Garden & Forestry');
+    return {
+      imageUrl: matched?.explodedImageUrl || EXPLODED_IMAGES.brushcutter,
+      parts: matched?.parts && matched.parts.length > 0 ? matched.parts : BRUSHCUTTER_PARTS,
+      title: matched
+        ? `${matched.sku} · ${getLocalizedProductField(matched, 'name', lang)}`
+        : 'ZYN-BC Series · Heavy Clearing Brush Cutter & Agro Shaft',
+      product: matched || siteData.products[0],
+    };
+  }, [assemblyTab, siteData.products, lang]);
+
+  const handleAssemblyTabSwitch = (key: AssemblyTabKey, logLabel: string) => {
+    setAssemblyTab(key);
+    trackEvent({
+      eventType: 'BUTTON_CLICK',
+      eventDetail: `Switched Blueprint: ${logLabel}`,
+      language: lang,
+      optionTag: `Blueprint:${key}`,
+    });
+  };
+
+  const quickTabs: { key: QuickGroupKey; label: string }[] = [
+    { key: 'all', label: t.products.quickGroups.all },
+    { key: 'gardenForestry', label: t.products.quickGroups.gardenForestry },
+    { key: 'agroSolar', label: t.products.quickGroups.agroSolar },
+    { key: 'powerPumps', label: t.products.quickGroups.powerPumps },
+    { key: 'constructionWashing', label: t.products.quickGroups.constructionWashing },
+    { key: 'toolsSpares', label: t.products.quickGroups.toolsSpares },
+  ];
+
+  return (
+    <div className="min-h-screen flex flex-col bg-[#06080A] text-[#111417]" dir={t.dir}>
+      {/* Non-Sticky Corporate Utility Bar with Language Selector */}
+      <div className="bg-[#06080A] text-gray-300 border-b border-white/10 text-xs">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 h-10 flex items-center justify-between gap-4">
+          <div className="flex items-center gap-2 text-gray-300 truncate">
+            <Globe className="w-3.5 h-3.5 text-[#7BE300] shrink-0" />
+            <span className="truncate">{t.utility.globalExport}</span>
+          </div>
+
+          <div className="flex items-center gap-4 shrink-0">
+            <label className="flex items-center gap-2 text-xs text-gray-300">
+              <span className="sr-only">{t.utility.languageLabel}</span>
+              <select
+                aria-label={t.utility.languageLabel}
+                value={lang}
+                onChange={(e) => handleLanguageChange(e.target.value as LanguageCode)}
+                className="bg-[#111417] border border-white/20 hover:border-[#65C800] text-white text-xs font-medium rounded px-2.5 py-1 focus:outline-none focus:border-[#65C800] cursor-pointer"
+              >
+                {LANGUAGES.map((item) => (
+                  <option key={item.code} value={item.code} className="bg-[#111417] text-white">
+                    {item.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+        </div>
+      </div>
+
+      {/* Strict 3-Zone Obsidian Sticky Header */}
+      <header className="sticky top-0 z-40 bg-[#06080A]/95 backdrop-blur-md border-b border-white/10">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 h-20 flex items-center justify-between gap-6">
+          {/* Zone 1: Enlarged Highlighted ZAYNOVA Logo */}
+          <a href="#about" className="shrink-0 focus-visible:outline-none">
+            <BrandLogo
+              logoUrl={siteData.brandConfig.logoUrl}
+              brandName={siteData.brandConfig.brandName}
+              darkSurface
+              sizeClass="h-14 sm:h-16"
+            />
           </a>
 
-          {/* Desktop Nav Actions */}
-          <nav id="desktop-nav" className="hidden lg:flex items-center gap-8">
-            <a 
-              href="#home" 
-              onClick={() => trackEvent({ eventType: 'BUTTON_CLICK', eventDetail: 'Jumped to Section from Desktop Header: Home' })}
-              className="text-gray-300 hover:text-white transition-colors text-sm font-outfit uppercase tracking-wider"
+          {/* Zone 2: 5 Single-Line Navigation Links */}
+          <nav className="hidden lg:flex items-center gap-7 text-xs font-semibold uppercase tracking-wider text-gray-200">
+            <a
+              href="#about"
+              className="hover:text-[#7BE300] transition-colors whitespace-nowrap shrink-0"
             >
-              Home
+              {t.nav.aboutUs}
             </a>
-            <a 
-              href="#about" 
-              onClick={() => trackEvent({ eventType: 'BUTTON_CLICK', eventDetail: 'Jumped to Section from Desktop Header: About' })}
-              className="text-gray-300 hover:text-white transition-colors text-sm font-outfit uppercase tracking-wider"
+            <a
+              href="#products"
+              className="hover:text-[#7BE300] transition-colors whitespace-nowrap shrink-0"
             >
-              About
+              {t.nav.products}
             </a>
-            <a 
-              href="#services" 
-              onClick={() => trackEvent({ eventType: 'BUTTON_CLICK', eventDetail: 'Jumped to Section from Desktop Header: Services' })}
-              className="text-gray-300 hover:text-white transition-colors text-sm font-outfit uppercase tracking-wider"
+            <a
+              href="#engineering"
+              className="hover:text-[#7BE300] transition-colors whitespace-nowrap shrink-0"
             >
-              Services
+              {t.nav.spareParts}
             </a>
-            <a 
-              href="#projects" 
-              onClick={() => trackEvent({ eventType: 'BUTTON_CLICK', eventDetail: 'Jumped to Section from Desktop Header: Projects' })}
-              className="text-gray-300 hover:text-white transition-colors text-sm font-outfit uppercase tracking-wider"
+            <a
+              href="#catalogs"
+              className="hover:text-[#7BE300] transition-colors whitespace-nowrap shrink-0"
             >
-              Projects
+              {t.nav.catalogs}
             </a>
-            <a 
-              href="#process" 
-              onClick={() => trackEvent({ eventType: 'BUTTON_CLICK', eventDetail: 'Jumped to Section from Desktop Header: Process' })}
-              className="text-gray-300 hover:text-white transition-colors text-sm font-outfit uppercase tracking-wider"
+            <a
+              href="#contact"
+              className="hover:text-[#7BE300] transition-colors whitespace-nowrap shrink-0"
             >
-              Process
-            </a>
-            <a 
-              href="#gallery" 
-              onClick={() => trackEvent({ eventType: 'BUTTON_CLICK', eventDetail: 'Jumped to Section from Desktop Header: Gallery' })}
-              className="text-gray-300 hover:text-white transition-colors text-sm font-outfit uppercase tracking-wider"
-            >
-              Gallery
-            </a>
-            <a 
-              href="#contact" 
-              onClick={() => trackEvent({ eventType: 'BUTTON_CLICK', eventDetail: 'Jumped to Section from Desktop Header: Contact' })}
-              className="text-gray-300 hover:text-white transition-colors text-sm font-outfit uppercase tracking-wider"
-            >
-              Contact
+              {t.nav.contactUs}
             </a>
           </nav>
 
-          {/* Nav CTA Buttons */}
-          <div className="hidden lg:flex items-center gap-4">
-            <button 
+          {/* Zone 3: 1 Primary CTA Action (+ Mobile Menu Button) */}
+          <div className="flex items-center gap-3 shrink-0">
+            <button
               type="button"
-              id="nav-btn-site-visit"
-              onClick={() => {
-                trackEvent({ eventType: 'BUTTON_CLICK', eventDetail: 'Clicked Header - Get Free Site Visit' });
-                openModal('site-visit');
-              }}
-              className="px-4 py-2 text-xs font-outfit uppercase tracking-wider text-gold-300 hover:text-white border border-gold-600/50 hover:border-gold-400 bg-gold-950/20 rounded-md transition-all cursor-pointer"
+              onClick={() => openQuoteModal('quote')}
+              className="px-4 sm:px-5 py-2.5 rounded-lg bg-[#65C800] hover:bg-[#7BE300] text-[#111417] text-xs sm:text-sm font-bold transition-colors whitespace-nowrap shrink-0 cursor-pointer"
             >
-              Get Free Site Visit
+              {t.nav.becomeDealer}
             </button>
-            <button 
+
+            <button
               type="button"
-              id="nav-btn-quotation"
-              onClick={() => {
-                trackEvent({ eventType: 'BUTTON_CLICK', eventDetail: 'Clicked Header - Request Quotation' });
-                openModal('quotation');
-              }}
-              className="px-4 py-2 text-xs font-outfit uppercase tracking-wider text-white bg-gradient-to-r from-gold-600 to-gold-500 hover:scale-[1.03] transition-all rounded-md cursor-pointer font-medium shadow-md gold-shadow"
+              onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+              className="lg:hidden p-2 rounded-lg text-white hover:bg-white/10 cursor-pointer"
+              aria-label="Toggle Menu"
             >
-              Request Quotation
+              {mobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
             </button>
           </div>
-
-          {/* Mobile Menu Action Icon */}
-          <button 
-            type="button"
-            id="mobile-menu-burger"
-            onClick={() => {
-              trackEvent({ eventType: 'BUTTON_CLICK', eventDetail: mobileMenuOpen ? 'Closed Burger Mobile Menu' : 'Opened Burger Mobile Menu' });
-              setMobileMenuOpen(!mobileMenuOpen);
-            }}
-            className="lg:hidden text-gray-300 hover:text-white p-1"
-            title="Toggle mobile menu"
-          >
-            {mobileMenuOpen ? <X className="w-6 h-6 text-gold-400" /> : <Menu className="w-6 h-6" />}
-          </button>
         </div>
+
+        {mobileMenuOpen && (
+          <div className="lg:hidden border-t border-white/10 bg-[#06080A] px-4 py-4 space-y-3 text-gray-200">
+            <a
+              href="#about"
+              onClick={() => setMobileMenuOpen(false)}
+              className="block py-2 text-sm font-medium hover:text-[#7BE300]"
+            >
+              {t.nav.aboutUs}
+            </a>
+            <a
+              href="#products"
+              onClick={() => setMobileMenuOpen(false)}
+              className="block py-2 text-sm font-medium hover:text-[#7BE300]"
+            >
+              {t.nav.products}
+            </a>
+            <a
+              href="#engineering"
+              onClick={() => setMobileMenuOpen(false)}
+              className="block py-2 text-sm font-medium hover:text-[#7BE300]"
+            >
+              {t.nav.spareParts}
+            </a>
+            <a
+              href="#catalogs"
+              onClick={() => setMobileMenuOpen(false)}
+              className="block py-2 text-sm font-medium hover:text-[#7BE300]"
+            >
+              {t.nav.catalogs}
+            </a>
+            <a
+              href="#contact"
+              onClick={() => setMobileMenuOpen(false)}
+              className="block py-2 text-sm font-medium hover:text-[#7BE300]"
+            >
+              {t.nav.contactUs}
+            </a>
+          </div>
+        )}
       </header>
 
-      {/* Mobile Drawer Slide Navigation */}
-      {mobileMenuOpen && (
-        <div id="mobile-nav-panel" className="fixed inset-0 z-30 lg:hidden bg-dark-mate/95 backdrop-blur-lg flex flex-col pt-28 px-6 pb-8 space-y-6 animate-fade-in border-b border-gold-900/40">
-          <button
-            type="button"
-            onClick={() => {
-              trackEvent({ eventType: 'BUTTON_CLICK', eventDetail: 'Closed Mobile Menu Drawer via X' });
-              setMobileMenuOpen(false);
-            }}
-            className="absolute top-6 right-6 text-gray-400 hover:text-white"
-            title="Close menu"
-          >
-            <X className="w-6 h-6" />
-          </button>
-          <div className="flex flex-col space-y-4">
-            {['Home', 'About', 'Services', 'Projects', 'Process', 'Gallery', 'Contact'].map((item) => (
-              <a 
-                key={item}
-                href={`#${item.toLowerCase()}`}
-                onClick={() => {
-                  trackEvent({ eventType: 'BUTTON_CLICK', eventDetail: `Jumped to Section from Mobile Menu: ${item}` });
-                  setMobileMenuOpen(false);
-                }}
-                className="text-white hover:text-gold-400 py-2 border-b border-neutral-900 font-display text-lg tracking-widest uppercase"
-              >
-                {item}
-              </a>
-            ))}
-          </div>
-          <div className="flex flex-col gap-3 pt-6">
-            <button 
-              type="button"
-              id="mobile-nav-site-visit"
-              onClick={() => { 
-                trackEvent({ eventType: 'BUTTON_CLICK', eventDetail: 'Clicked Mobile Drawer - Get Free Site Visit' });
-                openModal('site-visit'); 
-                setMobileMenuOpen(false); 
-              }}
-              className="w-full text-center py-3 text-sm font-outfit uppercase tracking-wider text-gold-300 border border-gold-500/30 rounded-xl bg-gold-950/15"
-            >
-              Get Free Site Visit
-            </button>
-            <button 
-              type="button"
-              id="mobile-nav-quotation"
-              onClick={() => { 
-                trackEvent({ eventType: 'BUTTON_CLICK', eventDetail: 'Clicked Mobile Drawer - Request Quotation' });
-                openModal('quotation'); 
-                setMobileMenuOpen(false); 
-              }}
-              className="w-full text-center py-3 text-sm font-outfit uppercase tracking-wider text-white bg-gold-600 rounded-xl font-medium"
-            >
-              Request Quotation
-            </button>
-          </div>
-        </div>
-      )}
-
-
-      {/* ---------------- HERO SECTION ---------------- */}
-      <section 
-        id="home"
-        className="relative min-h-screen lg:h-screen flex items-center justify-center overflow-hidden py-24 lg:py-16 pt-24 lg:pt-28"
+      {/* Subtle Desktop Right-Edge Vertical Catalogue Quick-Jump Tab */}
+      <a
+        href="#catalogs"
+        className="hidden lg:flex fixed right-0 top-1/2 -translate-y-1/2 z-30 bg-white hover:bg-[#65C800] text-[#111417] border border-r-0 border-[#E1E4E8] rounded-l-lg px-2 py-4 text-xs font-bold tracking-wider uppercase shadow-md transition-colors items-center justify-center"
+        style={{ writingMode: 'vertical-rl' }}
       >
-        {/* Cinematic Backdrop Image */}
-        <div className="absolute inset-0 z-0">
-          <img 
-            src={luxuryInteriorHero} 
-            alt="Zaynova Premium Architectural Residence Layout" 
-            className="w-full h-full object-cover scale-[1.03] opacity-65"
-            referrerPolicy="no-referrer"
-          />
-          {/* Heavy gradient vignette elements representing ultra-exclusive design feel */}
-          <div className="absolute inset-0 bg-gradient-to-t from-dark-mate via-dark-mate/60 to-transparent"></div>
-          <div className="absolute inset-0 bg-gradient-to-r from-dark-mate via-transparent to-dark-mate/30"></div>
-          <div className="absolute inset-0 bg-black/60"></div>
-        </div>
+        {t.catalogs.floatingLabel}
+      </a>
 
-        {/* Floating animated gold background architectural geometry particles */}
-        <div className="absolute inset-0 z-1 pointer-events-none opacity-20">
-          <div className="absolute top-1/4 left-10 w-[1px] h-48 bg-gradient-to-b from-gold-400 to-transparent animate-pulse"></div>
-          <div className="absolute bottom-1/4 right-20 w-48 h-[1px] bg-gradient-to-l from-gold-400 to-transparent"></div>
-          <div className="absolute top-1/3 right-1/4 w-32 h-32 border border-gold-500/25 rounded-full filter blur-xl animate-pulse"></div>
-        </div>
-
-        {/* Dynamic Responsive Screen grid setup (Hero Content Space) */}
-        <div className="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 w-full">
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-10 lg:gap-14 items-center">
-            
-            {/* Left Col: Master Typographics & Instant Shortcuts */}
-            <div className="lg:col-span-7 text-center lg:text-left flex flex-col items-center lg:items-start select-none">
-              {/* Luxury Gold Icon Overlay */}
-              <div className="inline-flex mb-5 animate-fade-in">
-                <div className="p-2.5 bg-black/85 rounded-xl border border-gold-500/30 shadow-2xl gold-glow">
-                  <ZaynovaLogo showText={false} className="w-12 h-12" />
-                </div>
-              </div>
-
-              <h2 className="text-xs uppercase tracking-[0.4em] font-outfit text-gold-300 font-medium mb-3">
-                Luxury Spaces. Built Right.
-              </h2>
-
-              <h1 className="text-3xl sm:text-5xl md:text-6xl xl:text-7.5xl font-display font-medium text-white mb-5 tracking-tight leading-[1.1] max-w-3xl">
-                Transforming Spaces <br />
-                <span className="gold-gradient-text italic font-normal font-serif">Into Timeless Luxury</span>
-              </h1>
-
-              <p className="text-zinc-300 text-sm md:text-base xl:text-lg font-sans font-light max-w-2xl mb-8 leading-relaxed">
-                Premium Interior, Renovation & Civil Work Solutions for elite Homes, Offices & Commercial Spaces. Executed with uncompromised engineering precision and absolute pricing transparency.
-              </p>
-
-              {/* Primary CTA Row */}
-              <div className="flex flex-col sm:flex-row gap-3 w-full sm:w-auto mb-8">
-                <button 
-                  type="button"
-                  id="hero-request-quotation"
-                  onClick={() => {
-                    trackEvent({ eventType: 'BUTTON_CLICK', eventDetail: 'Clicked Hero Header Action - Request Quotation' });
-                    openModal('quotation');
-                  }}
-                  className="w-full sm:w-auto px-6 py-3.5 bg-gradient-to-r from-gold-600 via-gold-500 to-gold-400 text-white font-outfit uppercase tracking-widest text-xs font-semibold rounded-xl shadow-xl gold-shadow hover:scale-103 transition-all text-center cursor-pointer"
-                >
-                  Request Quotation
-                </button>
-                <button 
-                  type="button"
-                  id="hero-book-site-visit"
-                  onClick={() => {
-                    trackEvent({ eventType: 'BUTTON_CLICK', eventDetail: 'Clicked Hero Header Action - Book Free Site Visit' });
-                    openModal('site-visit');
-                  }}
-                  className="w-full sm:w-auto px-6 py-3.5 border border-gold-400/40 hover:border-gold-300 bg-black/60 hover:bg-black/90 backdrop-blur text-gold-300 hover:text-white font-outfit uppercase tracking-widest text-xs font-semibold rounded-xl hover:scale-103 transition-all text-center cursor-pointer"
-                >
-                  Book Free Site Visit
-                </button>
-              </div>
-
-              {/* High-visibility instant jumping list (Option 1) */}
-              <div className="w-full border-t border-neutral-800/60 pt-5 flex flex-wrap justify-center lg:justify-start gap-4 text-xs font-outfit text-gray-400">
-                <span className="text-[10px] text-gold-400/70 uppercase tracking-widest font-semibold flex items-center gap-1.5 self-center">
-                  ⚡ Fast Access:
-                </span>
-                <a 
-                  href="#gallery" 
-                  className="px-3 py-1.5 bg-neutral-900/60 hover:bg-gold-950/20 rounded-lg border border-neutral-800/40 hover:border-gold-500/30 text-gray-300 hover:text-gold-300 transition-all flex items-center gap-1 cursor-pointer"
-                >
-                  📸 Custom Closet & Kitchen Photos
-                </a>
-                <a 
-                  href="#projects" 
-                  className="px-3 py-1.5 bg-neutral-900/60 hover:bg-gold-950/20 rounded-lg border border-neutral-800/40 hover:border-gold-500/30 text-gray-300 hover:text-gold-300 transition-all flex items-center gap-1 cursor-pointer"
-                >
-                  💼 Corporate Projects
-                </a>
-                <a 
-                  href="#services" 
-                  className="px-3 py-1.5 bg-neutral-900/60 hover:bg-gold-950/20 rounded-lg border border-neutral-800/40 hover:border-gold-500/30 text-gray-300 hover:text-gold-300 transition-all flex items-center gap-1 cursor-pointer"
-                >
-                  🛠️ Services
-                </a>
-              </div>
-            </div>
-
-            {/* Right Col: Interactive Live Showcase Spotlight HUD (Option 2) */}
-            <div className="lg:col-span-5 w-full flex flex-col items-center">
-              <div className="w-full max-w-md bg-black/75 backdrop-blur-md rounded-2xl border border-gold-500/20 hover:border-gold-500/40 p-4 shadow-2xl transition-all duration-350 relative group">
-                
-                {/* Spotlight Header Tab */}
-                <div className="flex justify-between items-center mb-3 text-xs font-mono">
-                  <span className="text-gold-400 flex items-center gap-1.5">
-                    <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse inline-block"></span>
-                    LIVE VISUAL HUD
-                  </span>
-                  <span className="text-gray-500">
-                    {currentSpotlightIndex + 1} / {SPOTLIGHT_IMAGES.length}
-                  </span>
-                </div>
-
-                {/* Main Spotlight Image Canvas */}
-                <div 
-                  className="aspect-[4/3] rounded-xl overflow-hidden relative border border-neutral-850/60 group/img cursor-zoom-in bg-zinc-900"
-                  onClick={() => {
-                    const activeImg = SPOTLIGHT_IMAGES[currentSpotlightIndex].image;
-                    trackEvent({ eventType: 'BUTTON_CLICK', eventDetail: `Zoomed Spotlight Image #${currentSpotlightIndex + 1}` });
-                    setLightboxImage(activeImg);
-                  }}
-                >
-                  <img 
-                    src={SPOTLIGHT_IMAGES[currentSpotlightIndex].image} 
-                    alt={SPOTLIGHT_IMAGES[currentSpotlightIndex].title}
-                    className="w-full h-full object-cover transition-all duration-700 brightness-95 group-hover/img:scale-105"
-                    referrerPolicy="no-referrer"
-                  />
-                  
-                  {/* Category Pill Tag Overlay */}
-                  <span className="absolute top-3 left-3 bg-black/85 backdrop-blur border border-gold-500/30 text-gold-300 text-[10px] uppercase font-outfit tracking-widest px-2.5 py-1 rounded-md font-semibold">
-                    {SPOTLIGHT_IMAGES[currentSpotlightIndex].type}
-                  </span>
-
-                  {/* Gentle hover magnifier hint */}
-                  <div className="absolute inset-0 bg-black/35 opacity-0 group-hover/img:opacity-100 transition-all flex items-center justify-center pointer-events-none">
-                    <div className="p-2.5 rounded-full bg-black/80 border border-gold-400 text-gold-400">
-                      <Maximize className="w-4 h-4" />
-                    </div>
-                  </div>
-                </div>
-
-                {/* Slide Details Metadata */}
-                <div className="mt-4 min-h-[72px]">
-                  <h4 className="text-sm font-display font-medium text-white tracking-wide uppercase leading-tight">
-                    {SPOTLIGHT_IMAGES[currentSpotlightIndex].title}
-                  </h4>
-                  <p className="text-xs text-gray-400 mt-1.5 leading-relaxed font-sans font-light">
-                    {SPOTLIGHT_IMAGES[currentSpotlightIndex].desc}
-                  </p>
-                </div>
-
-                {/* HUD Navigation Control Deck */}
-                <div className="flex justify-between items-center mt-3 border-t border-neutral-850/60 pt-3">
-                  {/* Left & Right custom buttons */}
-                  <div className="flex gap-2">
-                    <button 
-                      type="button"
-                      id="spotlight-prev"
-                      onClick={() => {
-                        const prevIdx = (currentSpotlightIndex - 1 + SPOTLIGHT_IMAGES.length) % SPOTLIGHT_IMAGES.length;
-                        trackEvent({ eventType: 'BUTTON_CLICK', eventDetail: `Clicked Spotlight Prev -> Slide #${prevIdx + 1}` });
-                        setCurrentSpotlightIndex(prevIdx);
-                      }}
-                      className="w-8 h-8 rounded-lg bg-neutral-900 border border-neutral-800 text-gray-400 hover:text-gold-400 flex items-center justify-center hover:bg-gold-950/10 hover:border-gold-500/35 transition-all cursor-pointer"
-                      title="Previous Slide"
-                    >
-                      <ChevronLeft className="w-4 h-4" />
-                    </button>
-                    <button 
-                      type="button"
-                      id="spotlight-next"
-                      onClick={() => {
-                        const nextIdx = (currentSpotlightIndex + 1) % SPOTLIGHT_IMAGES.length;
-                        trackEvent({ eventType: 'BUTTON_CLICK', eventDetail: `Clicked Spotlight Next -> Slide #${nextIdx + 1}` });
-                        setCurrentSpotlightIndex(nextIdx);
-                      }}
-                      className="w-8 h-8 rounded-lg bg-neutral-900 border border-neutral-800 text-gray-400 hover:text-gold-400 flex items-center justify-center hover:bg-gold-950/10 hover:border-gold-500/35 transition-all cursor-pointer"
-                      title="Next Slide"
-                    >
-                      <ChevronRight className="w-4 h-4" />
-                    </button>
-                  </div>
-
-                  {/* Thumbnail Row Indicator to easily jump to specific space */}
-                  <div className="flex gap-1.5">
-                    {SPOTLIGHT_IMAGES.map((item, idx) => (
-                      <button
-                        key={item.id}
-                        type="button"
-                        id={`spotlight-thumb-${idx}`}
-                        onClick={() => {
-                          trackEvent({ eventType: 'BUTTON_CLICK', eventDetail: `Clicked Spotlight Thumb -> Slide #${idx + 1}` });
-                          setCurrentSpotlightIndex(idx);
-                        }}
-                        className={`w-6 h-6 rounded overflow-hidden border transition-all ${
-                          currentSpotlightIndex === idx 
-                            ? 'border-gold-400 scale-110 shadow-md ring-1 ring-gold-500/30' 
-                            : 'border-neutral-800 opacity-60 hover:opacity-100 hover:border-neutral-600'
-                        }`}
-                        title={`Show ${item.type}`}
-                      >
-                        <img 
-                          src={item.image} 
-                          alt="Thumbnail preview" 
-                          className="w-full h-full object-cover" 
-                          referrerPolicy="no-referrer"
-                        />
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-              </div>
-            </div>
-
-          </div>
-        </div>
-
-        {/* Fine-line arrow slide indicator */}
-        <div className="absolute bottom-8 left-1/2 -translate-x-1/2 z-10 hidden lg:block">
-          <a href="#trust-badges" className="flex flex-col items-center gap-2 text-gray-500 hover:text-gold-400 transition-colors">
-            <span className="text-[10px] font-mono tracking-widest uppercase">Explore Excellence</span>
-            <div className="w-1 h-12 bg-gradient-to-b from-gold-500 to-transparent rounded-full"></div>
-          </a>
-        </div>
-      </section>
-
-
-      {/* ---------------- TRUST INDICATORS (BADGES) ---------------- */}
-      <section id="trust-badges" className="py-12 bg-dark-charcoal border-y border-neutral-900 relative">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-6 justify-center">
-            {TRUST_INDICATORS.map((badge, idx) => (
-              <div 
-                key={badge.title}
-                id={`trust-badge-${idx}`}
-                className="flex flex-col items-center text-center p-4 rounded-xl hover:bg-black/20 border border-transparent hover:border-gold-500/10 transition-all duration-300"
+      <main className="flex-1">
+        {/* SECTION 1: WE ARE ZAYNOVA — Centered Search + Industrial Campus Aerial Hero */}
+        <section id="about" className="bg-[#06080A] text-white pt-10 pb-12 lg:pt-14 lg:pb-16">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 space-y-8 text-center">
+            <div className="max-w-3xl mx-auto space-y-4">
+              <h1
+                className="font-display font-extrabold tracking-tight text-white uppercase leading-tight"
+                style={{ fontSize: 'clamp(2.1rem, 4.4vw, 3.65rem)' }}
               >
-                <div className="w-8 h-8 rounded-full bg-gold-950/30 border border-gold-500/30 flex items-center justify-center mb-3">
-                  <Check className="w-4 h-4 text-gold-400" />
-                </div>
-                <h4 className="text-[13px] font-outfit font-medium text-white uppercase tracking-wider mb-1 leading-snug">
-                  {badge.title}
-                </h4>
-                <p className="text-[11px] text-gray-400 leading-normal">
-                  {badge.desc}
-                </p>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-
-      {/* ---------------- ABOUT SECTION ---------------- */}
-      <section id="about" className="py-24 bg-dark-mate relative overflow-hidden">
-        {/* Delicate golden geometric line overlays */}
-        <div className="absolute top-1/2 -right-32 w-96 h-96 border border-gold-900/10 rounded-full select-none pointer-events-none filter blur-sm"></div>
-        
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-16 items-center">
-            {/* Editorial Frame Layout */}
-            <div className="col-span-1 lg:col-span-5 relative">
-              <div className="relative z-10 rounded-2xl overflow-hidden border border-neutral-800 gold-glow bg-neutral-900/50">
-                <img 
-                  src="https://images.unsplash.com/photo-1618221195710-dd6b41faaea6?auto=format&fit=crop&q=80&w=800"
-                  alt="High Finish Living Room Design"
-                  className="w-full aspect-[4/5] object-cover filter brightness-[0.85] contrast-[1.05] hover:scale-105 transition-all duration-700"
-                  referrerPolicy="no-referrer"
-                />
-                
-                {/* Floating Architectural Badge overlay */}
-                <div className="absolute bottom-6 left-6 right-6 bg-black/80 backdrop-blur-md p-5 rounded-xl border border-gold-500/25 flex items-center gap-4">
-                  <ZaynovaLogo showText={false} className="w-12 h-12 shrink-0 animate-spin-slow" />
-                  <div>
-                    <div className="text-white font-display text-sm uppercase tracking-wider">Premium Execution</div>
-                    <div className="text-gold-400 text-xs font-mono">120-Point Site Guidelines</div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Back Gold Mesh Grid Accent */}
-              <div className="absolute -top-6 -left-6 w-32 h-32 bg-[radial-gradient(#c59239_1px,transparent_1px)] [background-size:16px_16px] opacity-25 z-0"></div>
+                {t.hero.weAreTitle}
+              </h1>
+              <p className="text-sm sm:text-base text-gray-300 leading-relaxed">
+                {t.hero.subheadline}
+              </p>
             </div>
 
-            {/* Editorial Text Container */}
-            <div className="col-span-1 lg:col-span-7 space-y-8">
-              <div className="space-y-3">
-                <div className="flex items-center gap-2">
-                  <div className="h-[1px] w-8 bg-gold-400"></div>
-                  <span className="text-xs uppercase tracking-[0.3em] font-outfit text-gold-400 font-medium">The Signature Standard</span>
-                </div>
-                <h3 className="text-3xl md:text-5xl font-display font-medium text-white tracking-tight">
-                  About ZAYNOVA
-                </h3>
-              </div>
-
-              <div className="space-y-6 text-gray-300 text-sm md:text-base leading-relaxed font-light">
-                <p>
-                  ZAYNOVA delivers premium interior, renovation and civil work solutions tailored to modern residential and commercial spaces. Our approach combines design excellence, technical expertise and quality execution to create spaces that are both functional and visually stunning.
-                </p>
-                <p>
-                  Whether it is a complete home renovation, luxury interior transformation, office fit-out or custom construction project, our focus remains on unmatched quality, absolute cost transparency, and strict on-time client satisfaction guidelines.
-                </p>
-                <p className="border-l-2 border-gold-500/60 pl-4 py-1.5 italic text-gold-200 text-base font-serif bg-gold-950/10">
-                  "We do not build simple spaces. We curate architectural legacy coordinates designed to enrich life and empower corporations."
-                </p>
-              </div>
-
-              {/* Structural Bullet Stats */}
-              <div className="grid grid-cols-2 gap-6 pt-4 border-t border-neutral-900">
-                <div>
-                  <div className="text-gold-400 text-2xl font-mono font-medium">100%</div>
-                  <h5 className="text-white font-outfit text-xs font-medium uppercase tracking-wider mt-1">Contractual Transparency</h5>
-                  <p className="text-[11px] text-gray-400 mt-1">Every line-item listed clearly in advance with fixed margins.</p>
-                </div>
-                <div>
-                  <div className="text-gold-400 text-2xl font-mono font-medium">24/7</div>
-                  <h5 className="text-white font-outfit text-xs font-medium uppercase tracking-wider mt-1">Supervised Tracking</h5>
-                  <p className="text-[11px] text-gray-400 mt-1">Dedicated site engineers inspect tolerances to the millimeter.</p>
-                </div>
-              </div>
-
-              <div className="pt-4">
-                <a 
-                  href="#contact" 
-                  className="inline-flex items-center gap-3 text-xs uppercase tracking-widest font-outfit font-semibold text-white hover:text-gold-300 transition-colors group"
+            {/* Centered Automatic Branded Machinery & Manufacturing Carousel */}
+            <div
+              className="max-w-6xl mx-auto pt-1"
+              onMouseEnter={() => setHeroCarouselPaused(true)}
+              onMouseLeave={() => setHeroCarouselPaused(false)}
+            >
+              <div
+                dir="ltr"
+                className="relative aspect-[16/9] max-h-[520px] w-full rounded-xl overflow-hidden border border-white/15 bg-[#111417] shadow-2xl"
+              >
+                <div
+                  className="flex h-full w-full transition-transform duration-700 ease-out"
+                  style={{ transform: `translateX(-${heroSlideIdx * 100}%)` }}
                 >
-                  Initiate Design Dialogue 
-                  <ArrowRight className="w-4 h-4 text-gold-400 group-hover:translate-x-1.5 transition-transform" />
-                </a>
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
+                  {HERO_SLIDES.map((slide) => {
+                    const matchedProduct = slide.targetProductId
+                      ? siteData.products.find((p) => p.id === slide.targetProductId)
+                      : undefined;
 
+                    return (
+                      <div key={slide.id} className="relative w-full h-full shrink-0">
+                        <img
+                          src={slide.imageUrl}
+                          alt={slide.title}
+                          referrerPolicy="no-referrer"
+                          className="w-full h-full object-cover object-center"
+                        />
+                        <div className="absolute inset-0 bg-gradient-to-t from-[#06080A]/90 via-[#06080A]/15 to-transparent pointer-events-none" />
 
-      {/* ---------------- SERVICES SECTION (18 SERVICES) ---------------- */}
-      <section id="services" className="py-24 bg-dark-charcoal border-y border-neutral-900/40 relative">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          
-          <div className="text-center mb-16 space-y-4">
-            <span className="text-xs uppercase tracking-[0.3em] font-outfit text-gold-400 font-medium">Comprehensive Corporate Solutions</span>
-            <h3 className="text-3xl md:text-5xl font-display font-medium text-white tracking-tight">
-              Our Premium Services
-            </h3>
-            <p className="text-gray-400 max-w-2xl mx-auto text-sm md:text-base font-light">
-              We specialize in modern residences, high-end commercial spaces, structural modification, and detailed civil executions with absolute luxury standards.
-            </p>
+                        <div
+                          dir={t.dir}
+                          className="absolute bottom-0 inset-x-0 p-5 sm:p-7 flex flex-col sm:flex-row sm:items-end justify-between gap-3 text-start"
+                        >
+                          <div className="space-y-1 max-w-2xl">
+                            <div className="font-mono text-xs font-bold tracking-wider text-[#7BE300]">
+                              {slide.seriesCode}
+                            </div>
+                            <div className="font-display text-lg sm:text-2xl font-bold text-white leading-snug">
+                              {slide.title}
+                            </div>
+                            <p className="text-xs sm:text-sm text-gray-300">{slide.subtitle}</p>
+                          </div>
 
-            {/* Premium Category Filter Tabs */}
-            <div className="flex justify-center flex-wrap gap-2 pt-6">
-              {[
-                { id: 'all', label: 'All Services (18)' },
-                { id: 'interior', label: 'Interior Design & Modular Masterpieces' },
-                { id: 'renovation', label: 'Complete Luxury Renovations' },
-                { id: 'civil', label: 'Civil & Engineering Infrastructure' }
-              ].map((tab) => (
+                          {matchedProduct && (
+                            <button
+                              type="button"
+                              onClick={() => handleInspectProduct(matchedProduct, 'studio')}
+                              className="px-4 py-2.5 rounded-lg bg-[#65C800] hover:bg-[#7BE300] text-[#111417] text-xs font-bold inline-flex items-center gap-1.5 whitespace-nowrap shrink-0 self-start sm:self-end cursor-pointer transition-colors"
+                            >
+                              <span>{t.products.exploreModels}</span>
+                              <ArrowRight className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Previous / Next Controls */}
                 <button
                   type="button"
-                  key={tab.id}
-                  id={`srv-tab-${tab.id}`}
-                  onClick={() => {
-                    trackEvent({ eventType: 'BUTTON_CLICK', eventDetail: `Switched Services Tab to: ${tab.label}` });
-                    setActiveTab(tab.id as any);
-                  }}
-                  className={`px-4 sm:px-6 py-2.5 rounded-full text-xs font-outfit uppercase tracking-widest transition-all duration-300 border cursor-pointer ${
-                    activeTab === tab.id 
-                    ? 'bg-gold-500 text-black border-gold-400 font-medium font-semibold' 
-                    : 'bg-black/40 text-gray-400 border-neutral-800 hover:text-white hover:border-neutral-700'
-                  }`}
+                  onClick={() =>
+                    setHeroSlideIdx((prev) => (prev - 1 + HERO_SLIDES.length) % HERO_SLIDES.length)
+                  }
+                  aria-label="Previous slide"
+                  className="absolute left-3 top-1/2 -translate-y-1/2 w-9 h-9 rounded-full bg-[#06080A]/70 hover:bg-[#65C800] text-white hover:text-[#111417] border border-white/20 flex items-center justify-center transition-colors cursor-pointer"
                 >
-                  {tab.label}
+                  <ChevronLeft className="w-4 h-4" />
                 </button>
-              ))}
+                <button
+                  type="button"
+                  onClick={() => setHeroSlideIdx((prev) => (prev + 1) % HERO_SLIDES.length)}
+                  aria-label="Next slide"
+                  className="absolute right-3 top-1/2 -translate-y-1/2 w-9 h-9 rounded-full bg-[#06080A]/70 hover:bg-[#65C800] text-white hover:text-[#111417] border border-white/20 flex items-center justify-center transition-colors cursor-pointer"
+                >
+                  <ChevronRight className="w-4 h-4" />
+                </button>
+
+                {/* Subtle Slide Indicator Bars */}
+                <div className="hidden sm:flex items-center gap-1.5 absolute top-4 right-4 bg-[#06080A]/65 backdrop-blur-sm px-2.5 py-1.5 rounded-full border border-white/10">
+                  {HERO_SLIDES.map((slide, idx) => (
+                    <button
+                      key={slide.id}
+                      type="button"
+                      onClick={() => setHeroSlideIdx(idx)}
+                      aria-label={`Slide ${idx + 1}: ${slide.seriesCode}`}
+                      className={`h-1.5 rounded-full transition-all cursor-pointer ${
+                        idx === heroSlideIdx ? 'w-6 bg-[#7BE300]' : 'w-2 bg-white/35 hover:bg-white/70'
+                      }`}
+                    />
+                  ))}
+                </div>
+              </div>
             </div>
           </div>
+        </section>
 
-          {/* 18 Services Responsive Grid */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {filteredServices.map((service, idx) => (
-              <div 
-                key={service.id}
-                id={`service-card-${service.id}`}
-                className="group relative bg-dark-mate p-8 rounded-2xl border border-neutral-800 hover:border-gold-500/30 transition-all duration-500 flex flex-col justify-between gold-glow-hover"
-              >
+        {/* SECTION 2: PRESENCE GLOBAL + Wireframe Network Globe */}
+        <section className="bg-[#06080A] text-white py-14 lg:py-20 border-t border-white/10">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6">
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-10 lg:gap-12 items-center">
+              {/* Left Column: Presence Global + Stacked Bold KPIs */}
+              <div className="lg:col-span-5 space-y-8">
                 <div>
-                  <div className="flex justify-between items-start mb-6">
-                    <div className="p-4 bg-dark-charcoal rounded-xl border border-neutral-800 group-hover:border-gold-500/20 group-hover:bg-gold-950/20 transition-all">
-                      <ServiceIcon name={service.iconName} className="w-6 h-6 text-gold-400" />
-                    </div>
-                    <span className="text-xs font-mono text-neutral-600 font-medium">0{idx + 1}</span>
+                  <h2
+                    className="font-display font-extrabold text-white leading-[1.05] tracking-tight"
+                    style={{ fontSize: 'clamp(2.2rem, 3.8vw, 3.25rem)' }}
+                  >
+                    {t.hero.presenceLead}
+                  </h2>
+                  <div
+                    className="font-display font-light text-white leading-[1.1] tracking-tight"
+                    style={{ fontSize: 'clamp(2.1rem, 3.6vw, 3.1rem)' }}
+                  >
+                    {t.hero.presenceEmphasis}
+                  </div>
+                  <div className="h-1 w-28 bg-[#7BE300] mt-3" />
+                </div>
+
+                <div className="space-y-6">
+                  <div className="flex items-baseline gap-3">
+                    <span className="font-display text-4xl sm:text-5xl font-extrabold text-[#7BE300] tabular-nums">
+                      {t.hero.stat1Val}
+                    </span>
+                    <span className="text-sm sm:text-base font-medium tracking-[0.16em] text-gray-200 uppercase">
+                      {t.hero.stat1Label}
+                    </span>
                   </div>
 
-                  <h4 className="text-lg font-display font-medium text-white mb-3 group-hover:text-gold-200 transition-colors">
-                    {service.title}
-                  </h4>
+                  <div className="flex items-baseline gap-3">
+                    <span className="font-display text-4xl sm:text-5xl font-extrabold text-[#7BE300] tabular-nums">
+                      {t.hero.stat2Val}
+                    </span>
+                    <span className="text-sm sm:text-base font-medium tracking-[0.16em] text-gray-200 uppercase">
+                      {t.hero.stat2Label}
+                    </span>
+                  </div>
 
-                  <p className="text-gray-400 text-xs md:text-sm leading-relaxed mb-6 font-light">
-                    {service.description}
+                  <div className="flex items-baseline gap-3">
+                    <span className="font-display text-4xl sm:text-5xl font-extrabold text-[#7BE300] tabular-nums">
+                      {t.hero.stat3Val}
+                    </span>
+                    <span className="text-sm sm:text-base font-medium tracking-[0.16em] text-gray-200 uppercase">
+                      {t.hero.stat3Label}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-3 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => openQuoteModal('quote')}
+                    className="px-5 py-3 rounded-lg bg-[#65C800] hover:bg-[#7BE300] text-[#111417] text-sm font-bold transition-colors inline-flex items-center gap-2 whitespace-nowrap cursor-pointer"
+                  >
+                    <span>{t.hero.ctaDealer}</span>
+                    <ArrowRight className="w-4 h-4" />
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => openQuoteModal('meeting')}
+                    className="px-5 py-3 rounded-lg border border-white/25 hover:border-white text-white text-sm font-semibold transition-colors inline-flex items-center gap-2 whitespace-nowrap cursor-pointer"
+                  >
+                    <Calendar className="w-4 h-4 text-[#7BE300]" />
+                    <span>{t.hero.ctaMeeting}</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Right Column: Glowing 3D Network Wireframe Globe */}
+              <div className="lg:col-span-7">
+                <div className="aspect-[4/3] w-full rounded-xl overflow-hidden bg-[#06080A] flex items-center justify-center">
+                  {!globeImgError ? (
+                    <img
+                      src={GLOBAL_GLOBE_IMAGE}
+                      alt="ZAYNOVA Global Distributor & Export Network"
+                      referrerPolicy="no-referrer"
+                      onError={() => setGlobeImgError(true)}
+                      className="w-full h-full object-cover"
+                    />
+                  ) : (
+                    <div className="w-full h-full flex flex-col items-center justify-center border border-white/10 rounded-xl p-8 text-center">
+                      <Globe className="w-16 h-16 text-[#7BE300] mb-3" />
+                      <span className="font-display text-lg font-bold text-white">
+                        ZAYNOVA Global Distribution Network
+                      </span>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        {/* SECTION 3: CORE PRODUCT DIVISIONS (1 Card Per Line -> Click to Explore All Models) */}
+        <section id="products" className="py-16 lg:py-20 bg-[#F8F9FA] border-b border-[#E1E4E8]">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 space-y-8">
+            <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
+              <div className="max-w-2xl">
+                <h2 className="font-display text-2xl sm:text-3xl font-bold text-[#111417] tracking-tight">
+                  {t.products.sectionTitle}
+                </h2>
+                <p className="text-sm text-[#525B66] mt-2 leading-relaxed">
+                  {t.products.sectionSubtitle}
+                </p>
+              </div>
+              <div className="text-xs font-mono text-[#525B66] tabular-nums shrink-0">
+                {filteredProducts.length} / {siteData.products.length} {t.products.specs.units}
+              </div>
+            </div>
+
+            {/* Clean Division Filter Bar: Quick Tabs + 17-Segment Dropdown + Search */}
+            <div className="space-y-3">
+              <div className="flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-3">
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 flex-1 min-w-0">
+                  <div className="flex items-center gap-1 p-1 bg-[#E1E4E8]/70 rounded-lg overflow-x-auto">
+                    {quickTabs.map((tab) => {
+                      const isActive = quickGroup === tab.key && selectedCategory === 'ALL';
+                      return (
+                        <button
+                          key={tab.key}
+                          type="button"
+                          onClick={() => handleQuickGroupSelect(tab.key)}
+                          className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+                            isActive
+                              ? 'bg-white text-[#111417] shadow-sm'
+                              : 'text-[#525B66] hover:text-[#111417]'
+                          }`}
+                        >
+                          {tab.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  <label className="flex items-center gap-2 bg-white border border-[#E1E4E8] rounded-lg px-3 py-2 text-xs font-semibold text-[#111417] shrink-0">
+                    <span className="text-[#525B66] whitespace-nowrap">
+                      {t.products.segmentSelectLabel}
+                    </span>
+                    <select
+                      aria-label={t.products.segmentSelectLabel}
+                      value={selectedCategory}
+                      onChange={(e) =>
+                        handleCategorySelect(e.target.value as 'ALL' | ProductSegment)
+                      }
+                      className="bg-transparent font-semibold text-[#111417] focus:outline-none cursor-pointer max-w-[200px]"
+                    >
+                      <option value="ALL">{t.products.allCategories}</option>
+                      {ALL_SEGMENTS.map((seg) => (
+                        <option key={seg} value={seg}>
+                          {t.products.categories[seg] || seg}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+
+                {/* Live Model / Sub-Product / Part Search */}
+                <div className="relative w-full lg:w-72 shrink-0">
+                  <Search className="w-4 h-4 text-[#525B66] absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                  <input
+                    type="text"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    placeholder={t.hero.searchPlaceholder}
+                    className="w-full bg-white border border-[#E1E4E8] focus:border-[#4D9E00] rounded-lg pl-10 pr-4 py-2 text-sm text-[#111417] focus:outline-none"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* 3-Column Core Product Division Cards (Zero Pricing, Zero MOQ) */}
+            {filteredProducts.length === 0 ? (
+              <div className="bg-white border border-[#E1E4E8] rounded-xl p-12 text-center space-y-3">
+                <p className="text-sm text-[#525B66]">{t.products.emptyTitle}</p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setQuickGroup('all');
+                    setSelectedCategory('ALL');
+                    setSearchQuery('');
+                  }}
+                  className="px-4 py-2 rounded-lg bg-[#111417] text-white text-xs font-semibold cursor-pointer"
+                >
+                  {t.products.emptyReset}
+                </button>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {filteredProducts.map((product) => {
+                  const pName = getLocalizedProductField(product, 'name', lang);
+                  const pDesc = getLocalizedProductField(product, 'description', lang);
+                  const catLabel = t.products.categories[product.category] || product.category;
+                  const subCount = product.subModels?.length || 0;
+
+                  return (
+                    <article
+                      key={product.id}
+                      className="group bg-white border border-[#E1E4E8] hover:border-[#111417]/40 rounded-xl overflow-hidden flex flex-col transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md"
+                    >
+                      <button
+                        type="button"
+                        onClick={() => handleInspectProduct(product, 'studio')}
+                        className="aspect-[4/3] w-full bg-[#F1F3F6] overflow-hidden border-b border-[#E1E4E8] cursor-pointer text-left"
+                      >
+                        <ProductImageCard
+                          src={product.imageUrl}
+                          alt={pName}
+                          sku={product.sku}
+                        />
+                      </button>
+
+                      <div className="p-5 flex-1 flex flex-col justify-between gap-4">
+                        <div className="space-y-2">
+                          <div className="flex items-center gap-2 text-xs text-[#525B66]">
+                            <span className="font-mono font-semibold text-[#111417]">
+                              {product.sku}
+                            </span>
+                            <span aria-hidden="true">·</span>
+                            <span className="truncate">{catLabel}</span>
+                            {subCount > 0 && (
+                              <>
+                                <span aria-hidden="true">·</span>
+                                <span className="text-[#387500] font-semibold whitespace-nowrap tabular-nums">
+                                  {subCount} {t.products.specs.modelsLabel}
+                                </span>
+                              </>
+                            )}
+                          </div>
+
+                          <h3 className="font-display text-base font-bold text-[#111417] leading-snug">
+                            <button
+                              type="button"
+                              onClick={() => handleInspectProduct(product, 'studio')}
+                              className="text-start hover:text-[#387500] transition-colors cursor-pointer"
+                            >
+                              {pName}
+                            </button>
+                          </h3>
+
+                          <p className="text-xs text-[#525B66] leading-relaxed line-clamp-2">
+                            {pDesc}
+                          </p>
+                        </div>
+
+                        <div className="space-y-3.5">
+                          <div className="grid grid-cols-2 gap-3 border-t border-b border-[#E1E4E8] py-2.5 text-xs">
+                            <div>
+                              <div className="text-[11px] text-[#525B66]">
+                                {t.products.specs.displacement}
+                              </div>
+                              <div className="font-mono font-semibold text-[#111417] tabular-nums truncate">
+                                {product.displacement}
+                              </div>
+                            </div>
+                            <div>
+                              <div className="text-[11px] text-[#525B66]">
+                                {t.products.specs.power}
+                              </div>
+                              <div className="font-mono font-semibold text-[#111417] tabular-nums truncate">
+                                {product.powerSpec}
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => handleInspectProduct(product, 'exploded')}
+                              className="flex-1 py-2.5 px-2.5 rounded-lg border border-[#E1E4E8] hover:border-[#111417] text-xs font-semibold text-[#111417] transition-colors cursor-pointer whitespace-nowrap inline-flex items-center justify-center gap-1.5"
+                            >
+                              <Layers className="w-3.5 h-3.5 text-[#387500]" />
+                              <span>{t.products.inspectParts}</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleInspectProduct(product, 'studio')}
+                              className="flex-1 py-2.5 px-2.5 rounded-lg bg-[#111417] hover:bg-[#1C2024] text-white text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap inline-flex items-center justify-center gap-1.5"
+                            >
+                              <span>{t.products.exploreModels}</span>
+                              <ArrowRight className="w-3.5 h-3.5 text-[#7BE300]" />
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    </article>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </section>
+
+        {/* SECTION 4: Cinematic Internal Assembly & OEM Spare Parts Explorer */}
+        <section id="engineering" className="py-16 lg:py-20 bg-white border-b border-[#E1E4E8]">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 space-y-8">
+            <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-4">
+              <div className="max-w-2xl">
+                <h2 className="font-display text-2xl sm:text-3xl font-bold text-[#111417] tracking-tight">
+                  {t.engineering.sectionTitle}
+                </h2>
+                <p className="text-sm text-[#525B66] mt-2 leading-relaxed">
+                  {t.engineering.sectionSubtitle}
+                </p>
+              </div>
+
+              {activeAssemblyConfig.product && (
+                <button
+                  type="button"
+                  onClick={() =>
+                    handleInspectProduct(activeAssemblyConfig.product, 'studio')
+                  }
+                  className="px-4 py-2 rounded-lg border border-[#111417] text-xs font-semibold text-[#111417] hover:bg-[#111417] hover:text-white transition-colors whitespace-nowrap shrink-0 cursor-pointer self-start lg:self-auto"
+                >
+                  {t.engineering.openFullSpecs}
+                </button>
+              )}
+            </div>
+
+            {/* 5-Tab Segmented Engineering Blueprint Switcher */}
+            <div className="flex items-center gap-1 p-1 bg-[#F1F3F6] rounded-lg overflow-x-auto w-full lg:w-fit">
+              <button
+                type="button"
+                onClick={() =>
+                  handleAssemblyTabSwitch('brushcutter', 'Brush Cutter & Agro Shaft')
+                }
+                className={`px-4 py-2 rounded-md text-xs font-semibold transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+                  assemblyTab === 'brushcutter'
+                    ? 'bg-[#111417] text-[#7BE300] shadow-sm'
+                    : 'text-[#525B66] hover:text-[#111417]'
+                }`}
+              >
+                {t.engineering.tabBrushCutter}
+              </button>
+              <button
+                type="button"
+                onClick={() => handleAssemblyTabSwitch('chainsaw', 'Chainsaw Powertrain')}
+                className={`px-4 py-2 rounded-md text-xs font-semibold transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+                  assemblyTab === 'chainsaw'
+                    ? 'bg-[#111417] text-[#7BE300] shadow-sm'
+                    : 'text-[#525B66] hover:text-[#111417]'
+                }`}
+              >
+                {t.engineering.tabChainsaw}
+              </button>
+              <button
+                type="button"
+                onClick={() =>
+                  handleAssemblyTabSwitch('ohvEnginePump', '4-Stroke OHV Engine & Pump')
+                }
+                className={`px-4 py-2 rounded-md text-xs font-semibold transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+                  assemblyTab === 'ohvEnginePump'
+                    ? 'bg-[#111417] text-[#7BE300] shadow-sm'
+                    : 'text-[#525B66] hover:text-[#111417]'
+                }`}
+              >
+                {t.engineering.tabOhvEnginePump}
+              </button>
+              <button
+                type="button"
+                onClick={() =>
+                  handleAssemblyTabSwitch('pumpTurbine', 'Turbine & Triplex Washer')
+                }
+                className={`px-4 py-2 rounded-md text-xs font-semibold transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+                  assemblyTab === 'pumpTurbine'
+                    ? 'bg-[#111417] text-[#7BE300] shadow-sm'
+                    : 'text-[#525B66] hover:text-[#111417]'
+                }`}
+              >
+                {t.engineering.tabPumpTurbine}
+              </button>
+              <button
+                type="button"
+                onClick={() =>
+                  handleAssemblyTabSwitch('powerToolGearbox', 'Brushless Power Tool & Gear')
+                }
+                className={`px-4 py-2 rounded-md text-xs font-semibold transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+                  assemblyTab === 'powerToolGearbox'
+                    ? 'bg-[#111417] text-[#7BE300] shadow-sm'
+                    : 'text-[#525B66] hover:text-[#111417]'
+                }`}
+              >
+                {t.engineering.tabPowerToolGearbox}
+              </button>
+            </div>
+
+            <ExplodedPartsViewer
+              imageUrl={activeAssemblyConfig.imageUrl}
+              parts={activeAssemblyConfig.parts}
+              title={activeAssemblyConfig.title}
+              t={t}
+              onSelectPart={(part) =>
+                trackEvent({
+                  eventType: 'BUTTON_CLICK',
+                  eventDetail: `Inspected Internal Part: ${part.partCode} - ${part.name}`,
+                  language: lang,
+                  optionTag: `Part:${part.partCode}`,
+                })
+              }
+            />
+          </div>
+        </section>
+
+        {/* SECTION 5: Unified All-in-One Multilingual Master PDF Catalogue */}
+        <section id="catalogs" className="py-16 lg:py-20 bg-[#F8F9FA] border-b border-[#E1E4E8]">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 space-y-8">
+            <div className="max-w-3xl">
+              <h2 className="font-display text-2xl sm:text-3xl font-bold text-[#111417] tracking-tight">
+                {t.catalogs.sectionTitle}
+              </h2>
+              <p className="text-sm text-[#525B66] mt-2 leading-relaxed">
+                {t.catalogs.sectionSubtitle}
+              </p>
+            </div>
+
+            <div className="bg-white border border-[#E1E4E8] rounded-2xl overflow-hidden shadow-sm grid grid-cols-1 lg:grid-cols-12">
+              <div className="lg:col-span-5 bg-[#06080A] min-h-[260px] lg:min-h-[380px] relative overflow-hidden border-b lg:border-b-0 lg:border-e border-[#E1E4E8]">
+                <CatalogCoverCard
+                  src={siteData.catalogs[0]?.coverImage || ''}
+                  alt={t.catalogs.masterTitle}
+                />
+                <div className="absolute inset-0 bg-gradient-to-t from-[#06080A]/85 via-transparent to-transparent pointer-events-none" />
+                <div className="absolute bottom-4 inset-x-4 flex items-center justify-between gap-3">
+                  <span className="font-mono text-xs font-bold text-[#7BE300] tracking-wider">
+                    2026 MASTER PDF · {t.shortLabel}
+                  </span>
+                  <span className="font-mono text-[11px] text-gray-200 bg-[#06080A]/80 border border-white/15 px-2.5 py-1 rounded">
+                    {siteData.products.length} {t.products.specs.units.toUpperCase()}
+                  </span>
+                </div>
+              </div>
+
+              <div className="lg:col-span-7 p-6 sm:p-8 lg:p-10 flex flex-col justify-between gap-6">
+                <div className="space-y-4">
+                  <div className="inline-flex items-center gap-2 text-xs font-mono font-bold text-[#387500] uppercase tracking-wider">
+                    <FileText className="w-4 h-4" />
+                    <span>{t.catalogs.masterBadge}</span>
+                  </div>
+
+                  <h3 className="font-display text-xl sm:text-2xl font-bold text-[#111417] leading-snug">
+                    {t.catalogs.masterTitle}
+                  </h3>
+
+                  <p className="text-sm text-[#525B66] leading-relaxed">
+                    {t.catalogs.masterDesc}
                   </p>
 
-                  <ul className="space-y-2 mb-6 border-t border-neutral-900/60 pt-4">
-                    {service.features.map(feat => (
-                      <li key={feat} className="flex items-center gap-2 text-[11px] text-gray-300">
-                        <Check className="w-3.5 h-3.5 text-gold-500 shrink-0" />
-                        <span>{feat}</span>
-                      </li>
-                    ))}
+                  <ul className="space-y-2 pt-1 text-xs sm:text-sm text-[#111417]">
+                    <li className="flex items-start gap-2.5">
+                      <Check className="w-4 h-4 text-[#4D9E00] shrink-0 mt-0.5" />
+                      <span>{t.catalogs.bullet1}</span>
+                    </li>
+                    <li className="flex items-start gap-2.5">
+                      <Check className="w-4 h-4 text-[#4D9E00] shrink-0 mt-0.5" />
+                      <span>{t.catalogs.bullet2}</span>
+                    </li>
+                    <li className="flex items-start gap-2.5">
+                      <Check className="w-4 h-4 text-[#4D9E00] shrink-0 mt-0.5" />
+                      <span>{t.catalogs.bullet3}</span>
+                    </li>
                   </ul>
                 </div>
 
-                <div className="pt-2">
-                  <button 
-                    type="button"
-                    onClick={() => {
-                      trackEvent({ eventType: 'BUTTON_CLICK', eventDetail: `Clicked 'Custom Consultant Plan' for service: ${service.title}` });
-                      openModal('site-visit', service.title);
-                    }}
-                    className="w-full text-center py-2.5 rounded-lg border border-neutral-800 hover:border-gold-500/25 text-xs text-gray-400 hover:text-white font-outfit uppercase tracking-widest transition-all hover:bg-gold-950/10 cursor-pointer"
-                  >
-                    Custom Consultant Plan
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
+                <div className="pt-4 border-t border-[#E1E4E8] space-y-4">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div className="text-xs text-[#525B66]">
+                      {t.catalogs.activeLangHint}{' '}
+                      <span className="font-bold text-[#111417]">{t.nativeName}</span>
+                    </div>
 
-
-      {/* ---------------- WHY CHOOSE US ---------------- */}
-      <section id="why-choose-us" className="py-24 bg-dark-mate relative">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          
-          <div className="text-center mb-16 space-y-4">
-            <span className="text-xs uppercase tracking-[0.3em] font-outfit text-gold-400 font-medium">The Zaynova Commitment</span>
-            <h3 className="text-3xl md:text-5xl font-display font-medium text-white tracking-tight">
-              Why Discerning Clients Choose ZAYNOVA
-            </h3>
-            <p className="text-gray-400 max-w-xl mx-auto text-sm">
-              We stand apart through radical transparency, high engineering specifications, and hand-delivered luxury endings.
-            </p>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-            {WHY_CHOOSE_US_POINTS.map((point, idx) => (
-              <div 
-                key={point.title}
-                id={`why-choose-us-tile-${idx}`}
-                className="p-8 bg-dark-charcoal border border-neutral-800/80 rounded-2xl hover:border-gold-500/10 transition-all group hover:bg-neutral-900"
-              >
-                <div className="flex items-center gap-4 mb-4">
-                  <span className="text-2xl font-mono text-neutral-700 font-semibold group-hover:text-gold-500 transition-colors">
-                    0{idx + 1}
-                  </span>
-                  <div className="h-[1px] w-6 bg-gold-500/40"></div>
-                  <h4 className="text-md font-display font-medium text-white tracking-wide">
-                    {point.title}
-                  </h4>
-                </div>
-                <p className="text-xs md:text-sm text-gray-400 leading-relaxed font-light">
-                  {point.description}
-                </p>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-
-      {/* ---------------- OUR PROCESS (TIMELINE) ---------------- */}
-      <section id="process" className="py-24 bg-dark-charcoal border-y border-neutral-900 relative">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          
-          <div className="text-center mb-20 space-y-4">
-            <span className="text-xs uppercase tracking-[0.3em] font-outfit text-gold-400 font-medium">Flat Workflow Mechanics</span>
-            <h3 className="text-3xl md:text-4xl font-display font-medium text-white tracking-tight">
-              Our Professional Process
-            </h3>
-            <p className="text-gray-400 max-w-xl mx-auto text-sm">
-              Every millimeter of execution coordinate obeys a rigorous, milestone-driven pathway to flawless delivery.
-            </p>
-          </div>
-
-          {/* Interactive Steps Grid-Timeline */}
-          <div className="relative">
-            {/* Center connector line (Desktop only) */}
-            <div className="absolute top-[4.5rem] left-[15%] right-[15%] h-[1px] bg-gradient-to-r from-gold-900/30 via-gold-500/20 to-gold-900/30 hidden xl:block z-0"></div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7 gap-6 relative z-10">
-              {PROCESS_STEPS.map((step) => (
-                <div 
-                  key={step.stepNumber}
-                  id={`process-step-${step.stepNumber}`}
-                  className="group flex flex-col items-center text-center p-6 bg-dark-mate border border-neutral-800/60 rounded-2xl hover:border-gold-500/20 transition-all duration-300"
-                >
-                  {/* Step Code circular bubble */}
-                  <div className="w-12 h-12 rounded-full bg-dark-charcoal border border-neutral-800 group-hover:border-gold-400 flex items-center justify-center text-xs font-mono text-gold-400 font-bold mb-4 shadow-md transition-all group-hover:bg-gold-950/20">
-                    {step.stepNumber}
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      {LANGUAGES.map((item) => (
+                        <button
+                          key={item.code}
+                          type="button"
+                          onClick={() => handleLanguageChange(item.code)}
+                          className={`px-2.5 py-1 rounded text-[11px] font-semibold transition-colors cursor-pointer ${
+                            lang === item.code
+                              ? 'bg-[#111417] text-[#7BE300]'
+                              : 'bg-[#F1F3F6] text-[#525B66] hover:text-[#111417]'
+                          }`}
+                        >
+                          {item.label}
+                        </button>
+                      ))}
+                    </div>
                   </div>
 
-                  <h4 className="text-sm font-display font-medium text-white mb-2 uppercase tracking-wider">
-                    {step.title}
-                  </h4>
-
-                  <p className="text-[11px] text-gray-400 leading-normal font-light">
-                    {step.description}
-                  </p>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <div className="text-center mt-12 bg-neutral-950/40 p-4 rounded-xl border border-neutral-800 inline-block mx-auto max-w-full">
-            <p className="text-xs text-gray-400">
-              ⚡ Site visits and expert measurements are 100% complimentary.{' '}
-              <button 
-                type="button"
-                onClick={() => openModal('site-visit')}
-                className="text-gold-400 underline font-medium hover:text-gold-200 cursor-pointer"
-              >
-                Register Your Coordinates Now &rarr;
-              </button>
-            </p>
-          </div>
-        </div>
-      </section>
-
-
-      {/* ---------------- PROJECT SHOWCASE ---------------- */}
-      <section id="projects" className="py-24 bg-dark-mate relative">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          
-          <div className="flex flex-col lg:flex-row lg:justify-between lg:items-end gap-6 mb-16">
-            <div className="space-y-4">
-              <span className="text-xs uppercase tracking-[0.3em] font-outfit text-gold-400 font-medium">Prestige Portfolio</span>
-              <h3 className="text-3xl md:text-4xl font-display font-medium text-white tracking-tight">
-                Our Project Showcase
-              </h3>
-              <p className="text-gray-400 max-w-xl text-sm font-light">
-                Explore real photographs from high-end duplex villas, customized premium kitchens, corporate fit-outs, and structural civil projects.
-              </p>
-            </div>
-
-            {/* Portfolio Categories Filters Box */}
-            <div className="flex flex-wrap gap-2 max-w-2xl">
-              {portfolioCategories.map((cat) => (
-                <button
-                  type="button"
-                  key={cat}
-                  id={`portfolio-cat-${cat}`}
-                  onClick={() => {
-                    trackEvent({ eventType: 'BUTTON_CLICK', eventDetail: `Filtered Showcase Portfolio by cat: ${cat}` });
-                    setSelectedPortfolioCategory(cat);
-                  }}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-outfit uppercase tracking-wider transition-all cursor-pointer ${
-                    selectedPortfolioCategory === cat
-                    ? 'bg-gold-500 text-black font-semibold'
-                    : 'bg-dark-charcoal text-gray-400 hover:text-white hover:bg-neutral-800'
-                  }`}
-                >
-                  {cat === 'all' ? 'All (8)' : cat}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Grid list of showcase items */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-            {filteredProjects.map((proj) => (
-              <div 
-                key={proj.id}
-                id={`project-card-${proj.id}`}
-                className="group bg-dark-charcoal rounded-xl overflow-hidden border border-neutral-800/80 hover:border-gold-500/25 transition-all duration-500"
-              >
-                {/* Visual Block */}
-                <div className="relative aspect-[4/3] overflow-hidden bg-neutral-950">
-                  <img 
-                    src={proj.image} 
-                    alt={proj.title} 
-                    className="w-full h-full object-cover group-hover:scale-115 transition-all duration-700 opacity-85"
-                    referrerPolicy="no-referrer"
-                  />
-                  <div className="absolute inset-0 bg-gradient-to-t from-black via-transparent to-transparent opacity-60"></div>
-                  
-                  {/* Category Pill Tag */}
-                  <div className="absolute top-3 left-3 bg-black/75 backdrop-blur-md border border-gold-900/30 px-2.5 py-1 rounded text-[9px] font-outfit uppercase tracking-widest text-gold-300">
-                    {proj.category}
-                  </div>
-                </div>
-
-                {/* Info Block */}
-                <div className="p-5 space-y-2">
-                  <div className="text-[10px] uppercase font-mono text-gray-500 tracking-wider">
-                    {proj.location}
-                  </div>
-                  <h4 className="text-white font-display text-sm font-medium tracking-wide group-hover:text-gold-200 transition-colors">
-                    {proj.title}
-                  </h4>
-                  <div className="flex justify-between items-center text-[11px] text-gray-400 pt-3 border-t border-neutral-900">
-                    <span>{proj.size}</span>
-                    <span className="text-gold-400">{proj.scope}</span>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-
-      {/* ---------------- BEFORE & AFTER COMPARISON SECTION ---------------- */}
-      <section className="py-24 bg-dark-charcoal border-y border-neutral-900 relative">
-        <BeforeAfterSlider />
-      </section>
-
-
-      {/* ---------------- GALLERY SECTION (MASONRY) ---------------- */}
-      <section id="gallery" className="py-24 bg-dark-mate relative">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          
-          <div className="text-center mb-16 space-y-4">
-            <span className="text-xs uppercase tracking-[0.3em] font-outfit text-gold-400 font-medium">Bespoke Catalogues</span>
-            <h3 className="text-3xl md:text-4xl font-display font-medium text-white tracking-tight">
-              Luxury Masonry Gallery
-            </h3>
-            <p className="text-gray-400 max-w-xl mx-auto text-sm">
-              Sift through our customized luxury project segments capturing elite craftsmanship finishes. Click images to expand.
-            </p>
-
-            {/* Gallery Filters */}
-            <div className="flex justify-center flex-wrap gap-2 pt-6">
-              {['All', 'Residential', 'Commercial', 'Interiors', 'Renovation', 'Civil Works'].map((cat) => (
-                <button
-                  type="button"
-                  key={cat}
-                  id={`gallery-filter-${cat}`}
-                  onClick={() => {
-                    trackEvent({ eventType: 'BUTTON_CLICK', eventDetail: `Filtered Luxury Masonry Gallery category: ${cat}` });
-                    setGalleryFilter(cat);
-                  }}
-                  className={`px-4 py-1.5 rounded-full text-xs font-outfit uppercase tracking-wider transition-all cursor-pointer ${
-                    galleryFilter === cat
-                    ? 'bg-gold-500 text-black font-semibold'
-                    : 'bg-dark-charcoal text-gray-400 hover:text-white border border-neutral-800'
-                  }`}
-                >
-                  {cat}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Masonry Grid layout */}
-          <div className="columns-1 md:columns-2 lg:columns-3 gap-6 space-y-6">
-            {filteredGallery.map((item) => (
-              <div 
-                key={item.id}
-                id={`gallery-item-${item.id}`}
-                onClick={() => {
-                  trackEvent({ eventType: 'BUTTON_CLICK', eventDetail: `Expanded image Lightbox for: ${item.tag} (${item.category} catalogue)` });
-                  setLightboxImage(item.image);
-                }}
-                className="break-inside-avoid relative rounded-xl overflow-hidden border border-neutral-800 group cursor-zoom-in gold-glow-hover transition-all"
-              >
-                <img 
-                  src={item.image} 
-                  alt={item.tag} 
-                  className="w-full h-auto object-cover group-hover:scale-105 transition-transform duration-500 filter brightness-[0.85] hover:brightness-[0.95]"
-                  referrerPolicy="no-referrer"
-                />
-                
-                {/* Smooth Hover Card */}
-                <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/30 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex flex-col justify-end p-6">
-                  <span className="text-[10px] uppercase text-gold-300 font-outfit tracking-widest mb-1">
-                    {item.category}
-                  </span>
-                  <h4 className="text-white font-display text-sm uppercase tracking-wider">
-                    {item.tag}
-                  </h4>
-                  <p className="text-[10px] text-gray-400 mt-1">ZAYNOVA Certified Premium finish</p>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-
-      {/* ---------------- CLIENT TESTIMONIALS ---------------- */}
-      <section className="py-24 bg-dark-charcoal border-y border-neutral-900 relative">
-        <div className="max-w-4xl mx-auto px-4">
-          <div className="text-center mb-12">
-            <span className="text-xs uppercase tracking-[0.3em] font-outfit text-gold-400 font-medium">Verifiable Client Feedback</span>
-            <h3 className="text-3xl md:text-4xl font-display font-medium text-white tracking-tight mt-2">
-              Our Client Testimonials
-            </h3>
-          </div>
-
-          <div id="testimonial-carousel" className="relative p-8 md:p-12 bg-dark-mate rounded-3xl border border-neutral-800 shadow-2xl gold-glow text-center">
-            {/* Elegant massive gold decorative citation quote mark */}
-            <div className="absolute top-4 left-6 text-7xl font-serif text-gold-900/30 select-none">“</div>
-            
-            <div className="space-y-6">
-              {/* Star Rating */}
-              <div className="flex justify-center gap-1">
-                {[...Array(TESTIMONIALS[currentTestimonial].rating)].map((_, i) => (
-                  <Star key={i} className="w-5 h-5 fill-gold-500 text-gold-500" />
-                ))}
-              </div>
-
-              <blockquote className="text-gray-300 text-base md:text-xl font-light italic leading-relaxed max-w-2xl mx-auto">
-                "{TESTIMONIALS[currentTestimonial].review}"
-              </blockquote>
-
-              <div>
-                <cite className="not-italic text-white font-display font-medium block text-base uppercase tracking-wider">
-                  {TESTIMONIALS[currentTestimonial].name}
-                </cite>
-                <span className="text-xs text-gold-400 font-outfit uppercase tracking-widest mt-1 block">
-                  {TESTIMONIALS[currentTestimonial].projectType}
-                </span>
-              </div>
-            </div>
-
-            {/* Slider Switch controls */}
-            <div className="flex justify-center gap-4 mt-8">
-              <button 
-                type="button"
-                id="testimonial-prev-btn"
-                onClick={carouselPrev}
-                className="p-2.5 rounded-full border border-neutral-800 hover:border-gold-500/30 text-gray-400 hover:text-white bg-black/40 transition-all cursor-pointer"
-                title="Previous testimonial"
-              >
-                <ChevronLeft className="w-5 h-5" />
-              </button>
-              <button 
-                type="button"
-                id="testimonial-next-btn"
-                onClick={carouselNext}
-                className="p-2.5 rounded-full border border-neutral-800 hover:border-gold-500/30 text-gray-400 hover:text-white bg-black/40 transition-all cursor-pointer"
-                title="Next testimonial"
-              >
-                <ChevronRight className="w-5 h-5" />
-              </button>
-            </div>
-          </div>
-        </div>
-      </section>
-
-
-      {/* ---------------- STATISTICS SECTION ---------------- */}
-      <section className="py-16 bg-dark-mate relative overflow-hidden">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-8">
-            {STATS.map((stat, idx) => (
-              <div 
-                key={stat.label}
-                id={`stat-display-${idx}`}
-                className="text-center space-y-2 p-6 bg-dark-charcoal/50 border border-neutral-800/40 rounded-2xl"
-              >
-                <div className="text-4xl md:text-5xl font-display font-medium text-gold-400 flex items-center justify-center font-mono">
-                  <span>{stat.value}</span>
-                  <span className="text-gold-300 ml-1">{stat.suffix}</span>
-                </div>
-                <div className="text-xs font-outfit uppercase tracking-widest text-gray-400">
-                  {stat.label}
-                </div>
-              </div>
-            ))}
-          </div>
-          <div className="text-center mt-10">
-            <span className="text-[10px] font-mono tracking-widest text-neutral-500 uppercase block">
-              ✓ All metrics represent genuine supervised work orders, completed consulting contracts, and verified on-site structures.
-            </span>
-          </div>
-        </div>
-      </section>
-
-
-      {/* ---------------- FAQ SECTION ---------------- */}
-      <section id="faq" className="py-24 bg-dark-charcoal border-y border-neutral-900 relative">
-        <div className="max-w-4xl mx-auto px-4">
-          
-          <div className="text-center mb-16 space-y-4">
-            <span className="text-xs uppercase tracking-[0.3em] font-outfit text-gold-400 font-medium">Resolving Inquiries</span>
-            <h3 className="text-3xl md:text-4xl font-display font-medium text-white tracking-tight">
-              Frequently Asked Questions
-            </h3>
-            <p className="text-gray-400 max-w-xl mx-auto text-sm">
-              Discover detailed specifications about our project timelines, turnkey services, and cost methodologies.
-            </p>
-          </div>
-
-          <div className="space-y-4">
-            {FAQS.map((faq) => {
-              const isOpen = activeFAQId === faq.id;
-              return (
-                <div 
-                  key={faq.id}
-                  id={`faq-item-${faq.id}`}
-                  className="bg-dark-mate rounded-2xl border border-neutral-800 overflow-hidden transition-all duration-300"
-                >
                   <button
                     type="button"
-                    onClick={() => {
-                      if (!isOpen) {
-                        trackEvent({ eventType: 'BUTTON_CLICK', eventDetail: `Expanded FAQ: "${faq.question}"` });
-                      }
-                      setActiveFAQId(isOpen ? null : faq.id);
-                    }}
-                    className="w-full text-left p-6 flex justify-between items-center gap-4 text-white hover:text-gold-200 transition-colors"
+                    onClick={handleDownloadMasterPdf}
+                    disabled={isGeneratingPdf}
+                    className="w-full sm:w-auto px-6 py-3.5 rounded-lg bg-[#65C800] hover:bg-[#7BE300] text-[#111417] text-sm font-bold transition-colors inline-flex items-center justify-center gap-2.5 cursor-pointer disabled:opacity-60"
                   >
-                    <span className="font-display font-medium text-sm md:text-base leading-relaxed">
-                      {faq.question}
-                    </span>
-                    <span className="p-1 rounded-full bg-neutral-900 border border-neutral-800 text-gold-400 shrink-0">
-                      {isOpen ? <Minus className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
+                    <Download className="w-4 h-4" />
+                    <span>
+                      {isGeneratingPdf
+                        ? t.catalogs.generatingBtn
+                        : `${t.catalogs.downloadBtn} (${t.nativeName})`}
                     </span>
                   </button>
-
-                  <div 
-                    className={`transition-all duration-300 overflow-hidden ${
-                      isOpen ? 'max-h-[300px] border-t border-neutral-900/60' : 'max-h-0'
-                    }`}
-                  >
-                    <div className="p-6 text-xs md:text-sm text-gray-400 leading-relaxed font-light">
-                      {faq.answer}
-                    </div>
-                  </div>
                 </div>
-              );
-            })}
+              </div>
+            </div>
           </div>
-        </div>
-      </section>
+        </section>
 
-
-      {/* ---------------- DEEPLINK CTA CONVERSION SECTION ---------------- */}
-      <section className="py-24 bg-gradient-to-b from-dark-mate to-black relative">
-        <div className="max-w-5xl mx-auto px-4 text-center space-y-8">
-          <div className="inline-flex items-center gap-2 px-3 py-1 bg-gold-950/40 border border-gold-800/40 rounded-full text-xs text-gold-300 font-outfit uppercase tracking-widest">
-            <Sparkles className="w-3.5 h-3.5 text-gold-400" />
-            Architectural Precision Guaranteed
-          </div>
-
-          <h2 className="text-3xl md:text-6xl font-display font-medium text-white tracking-tight">
-            Ready To Transform <br />
-            <span className="gold-gradient-text italic font-normal font-serif">Your Space?</span>
-          </h2>
-
-          <p className="text-gray-400 max-w-2xl mx-auto text-sm md:text-base leading-relaxed font-light">
-            Let ZAYNOVA bringing your structural vision to life with complete interior blueprints, modular wardrobes, and elite civil modifications. Consultations are complimentary on-site.
-          </p>
-
-          <div className="flex flex-wrap justify-center items-center gap-4 max-w-2xl mx-auto">
-            {/* Lead buttons */}
-            <button 
-              type="button"
-              id="cta-request-quotation"
-              onClick={() => {
-                trackEvent({ eventType: 'BUTTON_CLICK', eventDetail: 'Clicked Lower Section - Request Quotation' });
-                openModal('quotation');
-              }}
-              className="px-6 py-4 bg-gradient-to-r from-gold-600 via-gold-500 to-gold-400 hover:scale-[1.03] text-white font-outfit uppercase tracking-widest text-xs font-semibold rounded-xl shadow-lg transition-all cursor-pointer gold-shadow"
-            >
-              Request Quotation
-            </button>
-            <button 
-              type="button"
-              id="cta-book-site-visit"
-              onClick={() => {
-                trackEvent({ eventType: 'BUTTON_CLICK', eventDetail: 'Clicked Lower Section - Book Free Site Visit' });
-                openModal('site-visit');
-              }}
-              className="px-6 py-4 border border-gold-500/30 hover:border-gold-300 bg-gold-950/10 text-gold-300 hover:text-white font-outfit uppercase tracking-widest text-xs font-semibold rounded-xl transition-all cursor-pointer"
-            >
-              Book Free Site Visit
-            </button>
-            <a 
-              href="tel:+918750083150"
-              id="cta-call-direct"
-              onClick={() => {
-                trackEvent({ eventType: 'BUTTON_CLICK', eventDetail: 'Clicked Direct Phone Hub - Call Now (+918750083150)' });
-              }}
-              className="px-6 py-4 bg-neutral-900 border border-neutral-800 hover:border-neutral-700 text-white font-outfit uppercase tracking-widest text-xs font-semibold rounded-xl transition-all flex items-center gap-2"
-            >
-              <Phone className="w-3.5 h-3.5 text-gold-500" />
-              Call Now
-            </a>
-            <a 
-              href="https://wa.me/918750083150?text=Hello%20ZAYNOVA!%20I'd%20like%20to%20discuss%20a%20new%20interior%20renovation%20project." 
-              target="_blank"
-              rel="noreferrer"
-              id="cta-whatsapp-direct"
-              onClick={() => {
-                trackEvent({ eventType: 'BUTTON_CLICK', eventDetail: 'Clicked WhatsApp Hotlink - WhatsApp Us (+918750083150)' });
-              }}
-              className="px-6 py-4 bg-emerald-950/20 hover:bg-emerald-950/40 border border-emerald-800/40 hover:border-emerald-500/50 text-emerald-300 font-outfit uppercase tracking-widest text-xs font-semibold rounded-xl transition-all flex items-center gap-2"
-            >
-              <WhatsAppIcon className="w-3.5 h-3.5 text-emerald-400 fill-emerald-400" />
-              WhatsApp Us
-            </a>
-          </div>
-        </div>
-      </section>
-
-
-      {/* ---------------- CONTACT & FORM SECTION ---------------- */}
-      <section id="contact" className="py-24 bg-dark-charcoal border-y border-neutral-900 relative">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-16">
-            {/* Contact Details & Maps Box */}
-            <div className="space-y-8 flex flex-col justify-between">
-              <div className="space-y-6">
-                <span className="text-xs uppercase tracking-[0.3em] font-outfit text-gold-400 font-medium">Global Headquarters</span>
-                <ZaynovaLogo textClass="text-2xl md:text-3xl" />
-                <p className="text-gray-400 text-sm md:text-base leading-relaxed font-light">
-                  Specializing in complete residential, commercial and office interior solutions, renovation services, civil works, modular furniture, painting, tiles and premium plumbing.
+        {/* SECTION 6: Global Manufacturing Standards, Importer FAQs & Direct Partner Form */}
+        <section id="contact" className="py-16 lg:py-20 bg-white">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 space-y-12">
+            {/* Top Overview & 3 Engineering Pillars */}
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+              <div className="lg:col-span-5 space-y-4">
+                <h2 className="font-display text-2xl sm:text-3xl font-bold text-[#111417] tracking-tight">
+                  {t.exportSection.sectionTitle}
+                </h2>
+                <p className="text-sm text-[#525B66] leading-relaxed">
+                  {t.exportSection.sectionSubtitle}
                 </p>
-
-                <div className="space-y-4 pt-4 border-t border-neutral-900">
-                  <div className="flex gap-4 items-start">
-                    <div className="p-2.5 rounded-lg bg-dark-mate border border-neutral-800 text-gold-400 mt-1">
-                      <MapPin className="w-4 h-4" />
-                    </div>
-                    <div>
-                      <h5 className="text-white font-outfit text-sm font-medium uppercase tracking-wider">Office Coordinates</h5>
-                      <p className="text-xs text-gray-400 mt-1">Plot No. A-42, Sector-2, Noida, Gautam Buddha Nagar, Uttar Pradesh - 201301</p>
-                    </div>
-                  </div>
-
-                  <div className="flex gap-4 items-start">
-                    <div className="p-2.5 rounded-lg bg-dark-mate border border-neutral-800 text-gold-400 mt-1">
-                      <Phone className="w-4 h-4" />
-                    </div>
-                    <div>
-                      <h5 className="text-white font-outfit text-sm font-medium uppercase tracking-wider">Communications Desk</h5>
-                      <p className="text-xs text-gray-400 mt-1">
-                        <a href="tel:+918750083150" className="hover:text-gold-300 transition-colors">+91 87500 83150</a> (Click to Call)
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="flex gap-4 items-start">
-                    <div className="p-2.5 rounded-lg bg-dark-mate border border-neutral-800 text-gold-400 mt-1">
-                      <Mail className="w-4 h-4" />
-                    </div>
-                    <div>
-                      <h5 className="text-white font-outfit text-sm font-medium uppercase tracking-wider">Secure Email Address</h5>
-                      <p className="text-xs text-gray-400 mt-1">
-                        <a href="mailto:kabirhussain7700@gmail.com" className="hover:text-gold-300 transition-colors">kabirhussain7700@gmail.com</a>
-                      </p>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Breathtaking Dark Premium Google Maps Mockup */}
-              <div className="relative rounded-2xl overflow-hidden border border-neutral-850 h-[220px] bg-neutral-950/40 p-4 shrink-0 flex flex-col justify-end">
-                {/* Abstract grid representation resembling high-tech maps coordinates */}
-                <div className="absolute inset-0 bg-[linear-gradient(to_right,rgba(197,146,57,0.03)_1px,transparent_1px),linear-gradient(to_bottom,rgba(197,146,57,0.03)_1px,transparent_1px)] [background-size:24px_24px] pointer-events-none z-0"></div>
-                <div className="absolute top-1/2 left-1/3 w-32 h-32 bg-gold-500/10 rounded-full filter blur-3xl"></div>
-                
-                {/* Simulated luxury coordinates road map layout */}
-                <svg className="absolute inset-0 w-full h-full opacity-20 pointer-events-none" viewBox="0 0 400 200" fill="none">
-                  <path d="M10 50 H390 M100 10 V190 M250 10 V190 M50 100 L350 100" stroke="#c59239" strokeWidth="1" />
-                  <circle cx="250" cy="100" r="15" fill="#c59239" fillOpacity="0.3" stroke="#c59239" strokeWidth="2" />
-                </svg>
-
-                <div className="relative z-10 p-4 bg-black/85 backdrop-blur-md rounded-xl border border-gold-900/40 flex justify-between items-center">
-                  <div className="space-y-1">
-                    <div className="text-xs text-gold-300 font-mono tracking-widest uppercase">GPS Live Position</div>
-                    <div className="text-white text-xs">Zaynova Sector-2 HQ, Noida</div>
-                  </div>
-                  <a 
-                    href="https://maps.google.com" 
-                    target="_blank" 
-                    rel="noreferrer" 
-                    className="px-3 py-1.5 bg-gold-900/30 text-gold-300 hover:text-white border border-gold-500/30 rounded text-[10px] font-mono tracking-wider transition-all"
+                <div className="pt-2 flex flex-wrap gap-3">
+                  <button
+                    type="button"
+                    onClick={() => openQuoteModal('meeting')}
+                    className="px-5 py-2.5 rounded-lg bg-[#111417] hover:bg-[#1C2024] text-white text-sm font-semibold transition-colors inline-flex items-center gap-2 cursor-pointer"
                   >
-                    Open Earth Maps &rarr;
-                  </a>
+                    <Calendar className="w-4 h-4 text-[#7BE300]" />
+                    <span>{t.exportSection.scheduleMeetingBtn}</span>
+                  </button>
                 </div>
               </div>
-            </div>
 
-            {/* Leads Capture Form Box */}
-            <div id="contact-form-block" className="p-8 md:p-10 bg-dark-mate rounded-3xl border border-neutral-850 gold-glow relative overflow-hidden">
-              <h4 className="text-2xl font-display font-medium text-white mb-2 tracking-wide">
-                Submit An Inquiry
-              </h4>
-              <p className="text-xs text-gold-400 font-outfit uppercase tracking-widest mb-8">
-                Connect With Our Estimator Cell
-              </p>
-
-              {contactSuccess ? (
-                <div className="text-center py-12 space-y-6">
-                  <div className="w-12 h-12 rounded-full bg-gold-950/20 border border-gold-500/40 flex items-center justify-center mx-auto">
-                    <Check className="w-6 h-6 text-gold-400" />
-                  </div>
-                  <h5 className="text-white text-xl font-display font-medium">Dialogue Initiated Successfully</h5>
-                  <p className="text-gray-400 text-xs leading-relaxed max-w-sm mx-auto">
-                    Your records matching <span className="text-gold-300 font-medium">{contactType}</span> have been locked. An administrator will call your number instantly.
+              <div className="lg:col-span-7 grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div className="p-5 rounded-xl bg-[#F8F9FA] border border-[#E1E4E8] space-y-2">
+                  <Wrench className="w-5 h-5 text-[#387500]" />
+                  <h3 className="font-display text-sm font-bold text-[#111417]">
+                    {t.exportSection.pillar1Title}
+                  </h3>
+                  <p className="text-xs text-[#525B66] leading-relaxed">
+                    {t.exportSection.pillar1Desc}
                   </p>
-                  <div className="flex flex-col gap-2">
-                    <button 
-                      type="button"
-                      onClick={handleWAInquiry}
-                      className="px-4 py-2.5 bg-emerald-900/30 border border-emerald-700/30 text-emerald-300 rounded-lg text-xs"
-                    >
-                      Instant WhatsApp Routing
-                    </button>
-                    <button 
-                      type="button"
-                      onClick={() => setContactSuccess(false)}
-                      className="text-gray-500 hover:text-white text-[11px] underline"
-                    >
-                      Reset Form Fields
-                    </button>
-                  </div>
                 </div>
-              ) : (
-                <form onSubmit={handleContactSubmit} className="space-y-4">
-                  <div>
-                    <label className="block text-[10px] uppercase font-outfit tracking-wider text-gray-400 mb-1" htmlFor="contact-field-name">Your Customer Name *</label>
-                    <input 
-                      id="contact-field-name"
-                      type="text" 
-                      required 
-                      placeholder="E.g., Devendra Singh"
-                      value={contactName}
-                      onChange={(e) => setContactName(e.target.value)}
-                      className="w-full bg-neutral-950/60 border border-neutral-800 focus:border-gold-500 rounded-xl py-3 px-4 text-white text-xs outline-none transition-all"
-                    />
-                  </div>
 
-                  <div>
-                    <label className="block text-[10px] uppercase font-outfit tracking-wider text-gray-400 mb-1" htmlFor="contact-field-phone">Phone Number / Mobile *</label>
-                    <input 
-                      id="contact-field-phone"
-                      type="tel" 
-                      required 
-                      placeholder="E.g., +91 87500 83150"
-                      value={contactPhone}
-                      onChange={(e) => setContactPhone(e.target.value)}
-                      className="w-full bg-neutral-950/60 border border-neutral-800 focus:border-gold-500 rounded-xl py-3 px-4 text-white text-xs outline-none transition-all"
-                    />
-                  </div>
+                <div className="p-5 rounded-xl bg-[#F8F9FA] border border-[#E1E4E8] space-y-2">
+                  <Package className="w-5 h-5 text-[#387500]" />
+                  <h3 className="font-display text-sm font-bold text-[#111417]">
+                    {t.exportSection.pillar2Title}
+                  </h3>
+                  <p className="text-xs text-[#525B66] leading-relaxed">
+                    {t.exportSection.pillar2Desc}
+                  </p>
+                </div>
 
-                  <div>
-                    <label className="block text-[10px] uppercase font-outfit tracking-wider text-gray-400 mb-1" htmlFor="contact-field-email">Email Address</label>
-                    <input 
-                      id="contact-field-email"
-                      type="email" 
-                      placeholder="E.g., devendra@mansion.com"
-                      value={contactEmail}
-                      onChange={(e) => setContactEmail(e.target.value)}
-                      className="w-full bg-neutral-950/60 border border-neutral-800 focus:border-gold-500 rounded-xl py-3 px-4 text-white text-xs outline-none transition-all"
-                    />
-                  </div>
+                <div className="p-5 rounded-xl bg-[#F8F9FA] border border-[#E1E4E8] space-y-2">
+                  <ShieldCheck className="w-5 h-5 text-[#387500]" />
+                  <h3 className="font-display text-sm font-bold text-[#111417]">
+                    {t.exportSection.pillar3Title}
+                  </h3>
+                  <p className="text-xs text-[#525B66] leading-relaxed">
+                    {t.exportSection.pillar3Desc}
+                  </p>
+                </div>
+              </div>
+            </div>
 
-                  <div>
-                    <label className="block text-[10px] uppercase font-outfit tracking-wider text-gray-400 mb-1" htmlFor="contact-field-project">Select Project Category *</label>
-                    <select 
-                      id="contact-field-project"
-                      value={contactType}
-                      onChange={(e) => setContactType(e.target.value)}
-                      className="w-full bg-neutral-950/60 border border-neutral-800 focus:border-gold-500 rounded-xl py-3 px-4 text-white text-xs outline-none transition-all"
-                    >
-                      <option value="Residential Interiors">Residential Interiors</option>
-                      <option value="Modular Kitchen Concept">Modular Kitchens</option>
-                      <option value="Complete Home Renovation">Home Renovation</option>
-                      <option value="Executive Office Renovation">Office Renovation</option>
-                      <option value="Structural Civil Works">Civil Works</option>
-                      <option value="Custom Modular Wardrobes">Modular Wardrobes</option>
-                    </select>
-                  </div>
+            {/* 3-Step Importer Onboarding Roadmap */}
+            <div className="rounded-xl bg-[#06080A] text-white p-6 sm:p-8 space-y-5">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <h3 className="font-display text-lg font-bold text-white">
+                  {t.exportSection.onboardingStepsTitle}
+                </h3>
+                <span className="font-mono text-xs text-[#7BE300]">
+                  ISO 9001 · CE · EURO-V · OEM
+                </span>
+              </div>
 
-                  <div>
-                    <label className="block text-[10px] uppercase font-outfit tracking-wider text-gray-400 mb-1" htmlFor="contact-field-msg">Bespoke Project Description *</label>
-                    <textarea 
-                      id="contact-field-msg"
-                      rows={3} 
-                      placeholder="Briefly state your spatial size, configuration requirements, and material budgets..."
-                      value={contactMsg}
-                      onChange={(e) => setContactMsg(e.target.value)}
-                      className="w-full bg-neutral-950/60 border border-neutral-800 focus:border-gold-500 rounded-xl p-4 text-white text-xs outline-none transition-all resize-none"
-                    ></textarea>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+                <div className="p-4 rounded-lg bg-white/5 border border-white/10 space-y-1.5">
+                  <div className="font-display text-sm font-bold text-[#7BE300]">
+                    {t.exportSection.step1Title}
                   </div>
+                  <p className="text-xs text-gray-300 leading-relaxed">
+                    {t.exportSection.step1Desc}
+                  </p>
+                </div>
+                <div className="p-4 rounded-lg bg-white/5 border border-white/10 space-y-1.5">
+                  <div className="font-display text-sm font-bold text-[#7BE300]">
+                    {t.exportSection.step2Title}
+                  </div>
+                  <p className="text-xs text-gray-300 leading-relaxed">
+                    {t.exportSection.step2Desc}
+                  </p>
+                </div>
+                <div className="p-4 rounded-lg bg-white/5 border border-white/10 space-y-1.5">
+                  <div className="font-display text-sm font-bold text-[#7BE300]">
+                    {t.exportSection.step3Title}
+                  </div>
+                  <p className="text-xs text-gray-300 leading-relaxed">
+                    {t.exportSection.step3Desc}
+                  </p>
+                </div>
+              </div>
+            </div>
 
-                  <div className="pt-2 flex flex-col sm:flex-row gap-3">
-                    <button 
-                      type="submit"
-                      id="contact-submit-inquiry"
-                      disabled={contactSubmitting}
-                      className="flex-1 bg-gradient-to-r from-gold-600 via-gold-500 to-gold-400 hover:gold-gradient-bg text-white py-3 px-6 rounded-xl font-outfit uppercase tracking-widest text-xs font-semibold shadow-lg transition-all flex items-center justify-center gap-2 cursor-pointer"
-                    >
-                      {contactSubmitting ? (
-                        <span className="flex items-center gap-2">
-                          <svg className="animate-spin h-4 w-4 text-white" fill="none" viewBox="0 0 24 24">
-                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                          </svg>
-                          Submitting...
-                        </span>
-                      ) : (
-                        <>
-                          <Send className="w-4 h-4" />
-                          Submit Inquiry
-                        </>
-                      )}
-                    </button>
+            {/* 2-Column Doubt-Clearing FAQ + Direct Importer & Distributor Application Form */}
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+              {/* Left Column: Importer FAQ Accordion */}
+              <div className="lg:col-span-6 space-y-4">
+                <div className="space-y-1.5">
+                  <div className="inline-flex items-center gap-2 text-xs font-mono font-bold text-[#387500] uppercase tracking-wider">
+                    <HelpCircle className="w-4 h-4" />
+                    <span>IMPORTER &amp; DISTRIBUTOR CLARITY</span>
+                  </div>
+                  <h3 className="font-display text-xl sm:text-2xl font-bold text-[#111417]">
+                    {t.exportSection.faqTitle}
+                  </h3>
+                  <p className="text-xs sm:text-sm text-[#525B66] leading-relaxed">
+                    {t.exportSection.faqSubtitle}
+                  </p>
+                </div>
+
+                <div className="space-y-2.5">
+                  {t.exportSection.faqs.map((item, idx) => {
+                    const isOpen = openFaqIdx === idx;
+                    return (
+                      <div
+                        key={idx}
+                        className={`rounded-xl border transition-colors ${
+                          isOpen
+                            ? 'border-[#4D9E00] bg-[#F8F9FA]'
+                            : 'border-[#E1E4E8] bg-white hover:border-[#111417]/30'
+                        }`}
+                      >
+                        <button
+                          type="button"
+                          onClick={() => setOpenFaqIdx(isOpen ? -1 : idx)}
+                          aria-expanded={isOpen}
+                          className="w-full px-4 py-3.5 flex items-center justify-between gap-3 text-start cursor-pointer"
+                        >
+                          <span className="font-display text-sm font-bold text-[#111417] leading-snug">
+                            {item.q}
+                          </span>
+                          <ChevronDown
+                            className={`w-4 h-4 text-[#387500] shrink-0 transition-transform ${
+                              isOpen ? 'rotate-180' : ''
+                            }`}
+                          />
+                        </button>
+                        {isOpen && (
+                          <div className="px-4 pb-4 text-xs sm:text-sm text-[#525B66] leading-relaxed border-t border-[#E1E4E8]/80 pt-3">
+                            {item.a}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Right Column: Direct Importer & Distributor Application Form */}
+              <div className="lg:col-span-6 bg-[#F8F9FA] border border-[#E1E4E8] rounded-2xl p-6 sm:p-7 space-y-5">
+                <div className="space-y-1.5">
+                  <h3 className="font-display text-xl font-bold text-[#111417]">
+                    {t.exportSection.inlineFormTitle}
+                  </h3>
+                  <p className="text-xs sm:text-sm text-[#525B66] leading-relaxed">
+                    {t.exportSection.inlineFormSubtitle}
+                  </p>
+                </div>
+
+                {inlineSubmitted ? (
+                  <div className="bg-white border border-emerald-200 rounded-xl p-6 text-center space-y-4">
+                    <div className="w-12 h-12 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-700 flex items-center justify-center mx-auto">
+                      <Check className="w-6 h-6" />
+                    </div>
+                    <h4 className="font-display text-lg font-bold text-[#111417]">
+                      {t.modals.successTitle}
+                    </h4>
+                    <p className="text-xs sm:text-sm text-[#525B66] leading-relaxed">
+                      {t.modals.successBody}
+                    </p>
+                    <div className="flex flex-wrap items-center justify-center gap-3 pt-1">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setInlineSubmitted(false);
+                          setInlineNotes('');
+                        }}
+                        className="px-4 py-2 rounded-lg border border-[#E1E4E8] bg-[#F8F9FA] text-xs font-semibold text-[#111417] cursor-pointer"
+                      >
+                        Submit Another Inquiry
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => openQuoteModal('meeting')}
+                        className="px-4 py-2 rounded-lg bg-[#111417] text-xs font-semibold text-white inline-flex items-center gap-1.5 cursor-pointer"
+                      >
+                        <Calendar className="w-3.5 h-3.5 text-[#7BE300]" />
+                        <span>{t.exportSection.scheduleMeetingBtn}</span>
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <form onSubmit={handleInlinePartnerSubmit} className="space-y-3.5">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                      <div>
+                        <label className="block text-xs font-semibold text-[#111417] mb-1">
+                          {t.modals.companyName}
+                        </label>
+                        <input
+                          type="text"
+                          value={inlineCompany}
+                          onChange={(e) => setInlineCompany(e.target.value)}
+                          placeholder="Agro Machinery Imports Ltd."
+                          className="w-full rounded-lg border border-[#E1E4E8] bg-white px-3.5 py-2.5 text-sm text-[#111417] focus:outline-none focus:border-[#4D9E00]"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-semibold text-[#111417] mb-1">
+                          {t.modals.contactName} *
+                        </label>
+                        <input
+                          type="text"
+                          required
+                          value={inlineName}
+                          onChange={(e) => setInlineName(e.target.value)}
+                          placeholder="Full Name"
+                          className="w-full rounded-lg border border-[#E1E4E8] bg-white px-3.5 py-2.5 text-sm text-[#111417] focus:outline-none focus:border-[#4D9E00]"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                      <div>
+                        <label className="block text-xs font-semibold text-[#111417] mb-1">
+                          {t.modals.country} *
+                        </label>
+                        <input
+                          type="text"
+                          required
+                          value={inlineCountry}
+                          onChange={(e) => setInlineCountry(e.target.value)}
+                          placeholder="Brazil, France, Germany, Spain, UAE..."
+                          className="w-full rounded-lg border border-[#E1E4E8] bg-white px-3.5 py-2.5 text-sm text-[#111417] focus:outline-none focus:border-[#4D9E00]"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-semibold text-[#111417] mb-1">
+                          {t.modals.phone} *
+                        </label>
+                        <input
+                          type="tel"
+                          required
+                          value={inlinePhone}
+                          onChange={(e) => setInlinePhone(e.target.value)}
+                          placeholder="+33 / +49 / +55 / +971..."
+                          className="w-full rounded-lg border border-[#E1E4E8] bg-white px-3.5 py-2.5 text-sm text-[#111417] focus:outline-none focus:border-[#4D9E00]"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                      <div>
+                        <label className="block text-xs font-semibold text-[#111417] mb-1">
+                          {t.modals.email} *
+                        </label>
+                        <input
+                          type="email"
+                          required
+                          value={inlineEmail}
+                          onChange={(e) => setInlineEmail(e.target.value)}
+                          placeholder="buyer@company.com"
+                          className="w-full rounded-lg border border-[#E1E4E8] bg-white px-3.5 py-2.5 text-sm text-[#111417] focus:outline-none focus:border-[#4D9E00]"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-semibold text-[#111417] mb-1">
+                          {t.exportSection.inquiryTypeLabel}
+                        </label>
+                        <select
+                          value={inlineRole}
+                          onChange={(e) => setInlineRole(e.target.value)}
+                          className="w-full rounded-lg border border-[#E1E4E8] bg-white px-3.5 py-2.5 text-sm text-[#111417] focus:outline-none focus:border-[#4D9E00]"
+                        >
+                          <option value="National / Exclusive Importer">
+                            National / Exclusive Importer
+                          </option>
+                          <option value="Regional Distributor / Wholesaler">
+                            Regional Distributor / Wholesaler
+                          </option>
+                          <option value="Hardware & Agri Retail Chain">
+                            Hardware &amp; Agri Retail Chain
+                          </option>
+                          <option value="OEM / Private Label Partner">
+                            OEM / Private Label Partner
+                          </option>
+                        </select>
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-semibold text-[#111417] mb-1">
+                        {t.exportSection.preferredDivisionLabel}
+                      </label>
+                      <input
+                        type="text"
+                        value={inlineDivisions}
+                        onChange={(e) => setInlineDivisions(e.target.value)}
+                        className="w-full rounded-lg border border-[#E1E4E8] bg-white px-3.5 py-2.5 text-sm text-[#111417] focus:outline-none focus:border-[#4D9E00]"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-semibold text-[#111417] mb-1">
+                        {t.modals.notes}
+                      </label>
+                      <textarea
+                        rows={3}
+                        value={inlineNotes}
+                        onChange={(e) => setInlineNotes(e.target.value)}
+                        placeholder="Territory coverage, target machinery lines, or any technical questions..."
+                        className="w-full rounded-lg border border-[#E1E4E8] bg-white px-3.5 py-2.5 text-sm text-[#111417] focus:outline-none focus:border-[#4D9E00] resize-none"
+                      />
+                    </div>
+
                     <button
-                      type="button"
-                      id="contact-whatsapp-direct"
-                      onClick={handleWAInquiry}
-                      className="border border-emerald-900 bg-emerald-950/15 hover:bg-emerald-950/40 text-emerald-400 rounded-xl font-outfit uppercase tracking-widest text-xs font-semibold py-3 px-4 transition-all flex items-center justify-center gap-2 cursor-pointer"
+                      type="submit"
+                      disabled={inlineSubmitting}
+                      className="w-full py-3.5 px-5 rounded-lg bg-[#65C800] hover:bg-[#7BE300] text-[#111417] text-sm font-bold transition-colors flex items-center justify-center gap-2 cursor-pointer disabled:opacity-60"
                     >
-                      <WhatsAppIcon className="w-4 h-4 fill-emerald-400 text-emerald-400" />
-                      WhatsApp Direct
+                      <Send className="w-4 h-4" />
+                      <span>
+                        {inlineSubmitting
+                          ? t.modals.submitting
+                          : t.exportSection.submitInlineBtn}
+                      </span>
                     </button>
-                  </div>
-                </form>
-              )}
+                  </form>
+                )}
+              </div>
             </div>
           </div>
-        </div>
-      </section>
+        </section>
+      </main>
 
-
-      {/* ---------------- FOOTER ---------------- */}
-      <footer className="bg-black py-16 border-t border-neutral-900 relative">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-12">
-          
-          <div className="grid grid-cols-1 md:grid-cols-12 gap-12">
-            {/* Left box Logo */}
-            <div className="md:col-span-4 space-y-4">
-              <ZaynovaLogo />
-              <p className="text-gray-500 text-xs max-w-sm leading-relaxed mt-4">
-                Specializing in ultra-premium residential and commercial turnkey transformations, civil engineering, modular systems, and rigorous design curation.
+      {/* Obsidian Corporate Footer with Enlarged Highlighted Brand Logo */}
+      <footer className="bg-[#06080A] text-gray-300 border-t border-white/10">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-12 space-y-8">
+          <div className="grid grid-cols-1 md:grid-cols-12 gap-8">
+            <div className="md:col-span-5 space-y-4">
+              <BrandLogo
+                logoUrl={siteData.brandConfig.logoUrl}
+                brandName={siteData.brandConfig.brandName}
+                darkSurface
+                sizeClass="h-14 sm:h-16"
+              />
+              <p className="text-xs text-gray-400 leading-relaxed max-w-md">
+                {t.footer.description}
               </p>
-              <div className="text-neutral-600 text-[11px] font-mono">
-                REG No. LUX-88402/ZAYN
-              </div>
             </div>
 
-            {/* Mid Quick Links */}
-            <div className="md:col-span-4 grid grid-cols-2 gap-4">
-              <div>
-                <h5 className="text-white text-xs uppercase tracking-widest font-outfit font-medium mb-4 pb-2 border-b border-neutral-900 inline-block">
-                  Site Map
-                </h5>
-                <ul className="space-y-2.5 text-xs text-gray-500">
-                  <li><a href="#home" className="hover:text-gold-300 transition-colors">Home Landing</a></li>
-                  <li><a href="#about" className="hover:text-gold-300 transition-colors">About Story</a></li>
-                  <li><a href="#services" className="hover:text-gold-300 transition-colors">Premium Grid</a></li>
-                  <li><a href="#projects" className="hover:text-gold-300 transition-colors">Portfolio</a></li>
-                </ul>
-              </div>
-
-              <div>
-                <h5 className="text-white text-xs uppercase tracking-widest font-outfit font-medium mb-4 pb-2 border-b border-neutral-900 inline-block">
-                  Support Cells
-                </h5>
-                <ul className="space-y-2.5 text-xs text-gray-500">
-                  <li><a href="#process" className="hover:text-gold-300 transition-colors">Work Timeline</a></li>
-                  <li><a href="#gallery" className="hover:text-gold-300 transition-colors">Interior Gallery</a></li>
-                  <li><a href="#faq" className="hover:text-gold-300 transition-colors">FAQ Bureau</a></li>
-                  <li><a href="#contact" className="hover:text-gold-300 transition-colors">Concierge Desk</a></li>
-                </ul>
-              </div>
+            <div className="md:col-span-3 space-y-2.5">
+              <h4 className="font-display text-xs font-bold text-white uppercase tracking-wider">
+                {t.footer.navigationTitle}
+              </h4>
+              <ul className="space-y-1.5 text-xs text-gray-400">
+                <li>
+                  <a href="#products" className="hover:text-white transition-colors">
+                    {t.nav.products}
+                  </a>
+                </li>
+                <li>
+                  <a href="#engineering" className="hover:text-white transition-colors">
+                    {t.nav.spareParts}
+                  </a>
+                </li>
+                <li>
+                  <a href="#catalogs" className="hover:text-white transition-colors">
+                    {t.nav.catalogs}
+                  </a>
+                </li>
+                <li>
+                  <button
+                    type="button"
+                    onClick={() => openQuoteModal('meeting')}
+                    className="hover:text-white transition-colors cursor-pointer"
+                  >
+                    {t.hero.ctaMeeting}
+                  </button>
+                </li>
+              </ul>
             </div>
 
-            {/* Right Socials & Contact highlights */}
-            <div className="md:col-span-4 space-y-4">
-              <h5 className="text-white text-xs uppercase tracking-widest font-outfit font-medium">
-                Follow ZAYNOVA Standard
-              </h5>
-              <div className="flex gap-3 pt-2">
-                <a 
-                  href="https://www.instagram.com/zaynova.in" 
-                  target="_blank" 
-                  rel="noreferrer"
-                  id="instagram-social"
-                  className="w-10 h-10 rounded-lg bg-dark-charcoal border border-neutral-850 text-gray-400 hover:text-gold-400 flex items-center justify-center transition-all"
-                >
-                  <InstagramIcon className="w-4 h-4" />
-                </a>
-                <a 
-                  href="https://wa.me/918750083150" 
-                  target="_blank" 
-                  rel="noreferrer"
-                  id="whatsapp-social"
-                  className="w-10 h-10 rounded-lg bg-dark-charcoal border border-neutral-850 text-gray-400 hover:text-gold-400 flex items-center justify-center transition-all"
-                >
-                  <WhatsAppIcon className="w-4 h-4 text-emerald-400 fill-emerald-400" />
-                </a>
-              </div>
-              <div className="text-[10px] text-gray-600 leading-normal">
-                WhatsApp: +91 87500 83150 <br />
-                Mon - Sat: 9:00 AM - 7:30 PM (IST)
-              </div>
+            <div className="md:col-span-4 space-y-2.5">
+              <h4 className="font-display text-xs font-bold text-white uppercase tracking-wider">
+                {t.footer.exportComplianceTitle}
+              </h4>
+              <ul className="space-y-1.5 text-xs text-gray-400">
+                <li>{t.footer.complianceLine1}</li>
+                <li>{t.footer.complianceLine2}</li>
+                <li>{t.footer.complianceLine3}</li>
+              </ul>
             </div>
           </div>
 
-          {/* Extreme bottom copyright bounds */}
-          <div className="pt-8 border-t border-neutral-900 flex flex-col sm:flex-row justify-between items-center gap-4">
-            <span className="text-[10px] text-neutral-600">
-              &copy; 2026 ZAYNOVA. Architectural & Civil Systems. All Rights Reserved.
-            </span>
-            <div className="flex gap-4 text-[10px] text-neutral-600 font-outfit">
-              <a href="#about" className="hover:text-gold-500">Corporate Transparency Policy</a>
-              <a href="#process" className="hover:text-gold-500">120-Point Inspection Charter</a>
-              <button 
-                type="button" 
-                onClick={() => setIsAdminOpen(true)} 
-                className="hover:text-gold-300 transition-colors cursor-pointer text-left uppercase text-[9px] tracking-widest font-mono text-neutral-500 hover:underline"
-              >
-                [ Admin Panel ]
-              </button>
-            </div>
+          <div className="pt-6 border-t border-white/10 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-gray-500">
+            <span>{t.footer.copyright}</span>
+            <button
+              type="button"
+              onClick={() => setAdminOpen(true)}
+              className="text-gray-400 hover:text-[#7BE300] font-mono text-[11px] transition-colors cursor-pointer"
+            >
+              [ {t.footer.adminLink} ]
+            </button>
           </div>
         </div>
       </footer>
 
-
-      {/* ---------------- GLASSMORPHIC FLOATING NAVIGATION DOCK (Option 1) ---------------- */}
-      <div 
-        id="floating-navigation-dock"
-        className={`fixed bottom-6 left-1/2 -translate-x-1/2 z-40 px-5 py-2.5 rounded-full bg-black/85 backdrop-blur-lg border border-gold-500/30 shadow-2xl flex items-center justify-center gap-4 sm:gap-6 transition-all duration-500 max-w-[94vw] sm:max-w-xl ${
-          showFloatingDock ? 'translate-y-0 opacity-100 animate-slide-up' : 'translate-y-20 opacity-0 pointer-events-none'
-        }`}
-      >
-        <span className="text-[9px] text-gold-400 font-mono tracking-widest hidden sm:inline uppercase border-r border-neutral-800 pr-3">
-          ZAYNOVA DOCK:
-        </span>
-        
-        {/* Navigation Action Anchors */}
-        <a 
-          href="#home"
-          onClick={() => trackEvent({ eventType: 'BUTTON_CLICK', eventDetail: 'Scrolled to Home from Floating Dock' })}
-          className="text-gray-400 hover:text-white transition-all hover:scale-105 p-1 rounded-lg flex flex-col items-center gap-0.5 justify-center"
-          title="Scroll to Top"
-        >
-          <Home className="w-4 h-4 cursor-pointer text-gold-300" />
-          <span className="text-[8px] font-outfit uppercase tracking-widest font-normal scale-90">Home</span>
-        </a>
-
-        <a 
-          href="#services"
-          onClick={() => trackEvent({ eventType: 'BUTTON_CLICK', eventDetail: 'Scrolled to Services from Floating Dock' })}
-          className="text-gray-400 hover:text-white transition-all hover:scale-105 p-1 rounded-lg flex flex-col items-center gap-0.5 justify-center"
-          title="Scroll to Services"
-        >
-          <Briefcase className="w-4 h-4 cursor-pointer" />
-          <span className="text-[8px] font-outfit uppercase tracking-widest font-normal scale-90">Services</span>
-        </a>
-
-        <a 
-          href="#projects"
-          onClick={() => trackEvent({ eventType: 'BUTTON_CLICK', eventDetail: 'Scrolled to Projects from Floating Dock' })}
-          className="text-gray-400 hover:text-white transition-all hover:scale-105 p-1 rounded-lg flex flex-col items-center gap-0.5 justify-center"
-          title="Scroll to Projects"
-        >
-          <Grid className="w-4 h-4 cursor-pointer text-gold-400" />
-          <span className="text-[8px] font-outfit uppercase tracking-widest font-normal scale-90">Projects</span>
-        </a>
-
-        {/* Dynamic Image Jump Shortcut -> Direct view to Custom Closet / Modular Kitchen / Wardrobe Images */}
-        <a 
-          href="#gallery"
-          onClick={() => trackEvent({ eventType: 'BUTTON_CLICK', eventDetail: 'Bypassed sections to Gallery Images via Floating Dock' })}
-          className="relative px-3 py-1 bg-gold-950/40 border border-gold-500/40 hover:border-gold-400 rounded-full text-gold-300 hover:text-white transition-all hover:scale-105 flex items-center gap-1.5 cursor-pointer"
-          title="Jump directly to Images"
-        >
-          <span className="relative flex h-1.5 w-1.5">
-            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-gold-400 opacity-75"></span>
-            <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-gold-500"></span>
-          </span>
-          <span className="text-[9px] font-outfit uppercase tracking-widest font-semibold whitespace-nowrap">📸 Photos</span>
-        </a>
-
-        <button 
-          type="button" 
-          onClick={() => {
-            trackEvent({ eventType: 'BUTTON_CLICK', eventDetail: 'Opened Quote Modal from Floating Dock' });
-            openModal('quotation');
-          }}
-          className="px-3.5 py-1 text-[9px] font-outfit uppercase tracking-widest text-white bg-gradient-to-r from-gold-600 to-gold-500 hover:from-gold-500 hover:to-gold-400 rounded-full transition-all hover:scale-105 cursor-pointer font-semibold shadow"
-          title="Request Free Quote"
-        >
-          Quote
-        </button>
-      </div>
-
-
-      {/* ---------------- CONVERSION FLOATING DRAWER CONTROLS ---------------- */}
-      {/* Absolute floating quick communication lines */}
-      <div id="floating-communication-bar" className="fixed bottom-6 right-6 z-40 flex flex-col gap-3">
-        {/* Floating Quick WhatsApp */}
-        <a 
-          href="https://wa.me/918750083150?text=Hello%20ZAYNOVA!%20I%20would%20like%20to%20receive%20a%20luxury%20design%20catalogue."
-          target="_blank"
-          rel="noreferrer"
-          id="floating-wa-link"
-          onClick={() => {
-            trackEvent({ eventType: 'BUTTON_CLICK', eventDetail: 'Clicked Floating Quick action - WhatsApp Us' });
-          }}
-          className="w-12 h-12 rounded-full bg-emerald-600 hover:bg-emerald-500 hover:scale-110 text-white flex items-center justify-center shadow-xl transition-all relative group"
-          title="WhatsApp Us"
-        >
-          {/* Notification ping ripple badge */}
-          <span className="absolute -top-1 -right-1 w-3.5 h-3.5 rounded-full bg-red-500 border border-dark-mate flex items-center justify-center text-[8px] font-mono font-bold text-white">1</span>
-          
-          <WhatsAppIcon className="w-6 h-6 text-white fill-white" />
-          <span className="absolute right-14 bg-black/85 backdrop-blur border border-emerald-500/30 text-emerald-300 text-[10px] font-outfit uppercase tracking-wider py-1.5 px-3 rounded-lg opacity-0 group-hover:opacity-100 transition-all shadow-md pointer-events-none whitespace-nowrap">
-            Chat on WhatsApp
-          </span>
-        </a>
-
-        {/* Floating Quick Consultation click to Call */}
-        <a 
-          href="tel:+918750083150"
-          id="floating-call-link"
-          onClick={() => {
-            trackEvent({ eventType: 'BUTTON_CLICK', eventDetail: 'Clicked Floating Quick action - Call Concierge Direct' });
-          }}
-          className="w-12 h-12 rounded-full bg-gradient-to-r from-gold-600 to-gold-400 hover:scale-110 text-white flex items-center justify-center shadow-xl transition-all relative group gold-shadow"
-          title="Direct Call Desk"
-        >
-          <Phone className="w-5 h-5" />
-          <span className="absolute right-14 bg-black/85 backdrop-blur border border-gold-500/30 text-gold-300 text-[10px] font-outfit uppercase tracking-wider py-1.5 px-3 rounded-lg opacity-0 group-hover:opacity-100 transition-all shadow-md pointer-events-none whitespace-nowrap">
-            Call Concierge
-          </span>
-        </a>
-      </div>
-
-
-      {/* ---------------- LIGHTBOX MODAL ---------------- */}
-      {lightboxImage && (
-        <div 
-          id="gallery-lightbox-modal"
-          className="fixed inset-0 z-50 bg-black/95 backdrop-blur-md flex items-center justify-center p-4"
-          onClick={() => setLightboxImage(null)}
-        >
-          <button 
-            type="button"
-            className="absolute top-6 right-6 text-gray-400 hover:text-white p-2"
-            title="Close image preview"
-          >
-            <X className="w-8 h-8" />
-          </button>
-          <div className="max-w-5xl max-h-[85vh]">
-            <img 
-              src={lightboxImage} 
-              alt="Expanded Preview" 
-              className="max-w-full max-h-[85vh] object-contain rounded-lg shadow-2xl border border-neutral-800"
-              referrerPolicy="no-referrer"
-            />
-          </div>
-        </div>
-      )}
-
-
-      {/* ---------------- MODIFIED LEAD FORM DIALOG MODAL ---------------- */}
-      <LeadModal 
-        isOpen={isModalOpen}
-        onClose={() => setIsModalOpen(false)}
-        initialType={modalType}
-        selectedServiceTitle={selectedService}
+      {/* Modals */}
+      <ProductDetailModal
+        product={activeProduct}
+        initialMode={activeProductMode}
+        initialSubModelSku={matchedSubModelSku}
+        lang={lang}
+        t={t}
+        onClose={() => setActiveProduct(null)}
+        onRequestQuery={(_product, modelLabel) => {
+          setActiveProduct(null);
+          openQuoteModal('quote', modelLabel);
+        }}
+        onBookMeeting={(_product, modelLabel) => {
+          setActiveProduct(null);
+          openQuoteModal('meeting', modelLabel);
+        }}
       />
 
-      {/* ---------------- BESPOKE ADMINISTRATIVE AUDIT CONSOLE ---------------- */}
-      <AdminDashboard 
-        isOpen={isAdminOpen}
-        onClose={() => setIsAdminOpen(false)}
+      <BulkQuoteAndMeetingModal
+        isOpen={inquiryModalOpen}
+        initialTab={inquiryModalTab}
+        preselectedProduct={preselectedModel}
+        lang={lang}
+        t={t}
+        onClose={() => setInquiryModalOpen(false)}
       />
 
+      <AdminDashboard
+        isOpen={adminOpen}
+        products={siteData.products}
+        sheetSource={siteData.source}
+        onClose={() => setAdminOpen(false)}
+        onRefreshSiteData={syncFromSheet}
+      />
     </div>
   );
 }
 
-// Simple custom inline SVG icon for Instagram
-function InstagramIcon({ className = "w-4 h-4" }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <rect width="20" height="20" x="2" y="2" rx="5" ry="5"/>
-      <path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"/>
-      <line x1="17.5" x2="17.51" y1="6.5" y2="6.5"/>
-    </svg>
-  );
-}
-
-// Simple custom inline SVG icon for Facebook
-function FacebookIcon({ className = "w-4 h-4" }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M18 2h-3a5 5 0 0 0-5 5v3H7v4h3v8h4v-8h3l1-4h-4V7a1 1 0 0 1 1-1h3z"/>
-    </svg>
-  );
-}
-
-// Simple custom inline SVG icon for WhatsApp
-function WhatsAppIcon({ className = "w-4 h-4 fill-current" }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="currentColor">
-      <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L0 24l6.335-1.662c1.746.953 3.71 1.458 5.705 1.459h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/>
-    </svg>
-  );
-}
+export default App;
